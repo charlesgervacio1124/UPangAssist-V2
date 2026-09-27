@@ -1,0 +1,12 @@
+{
+  "name": "upang-assist-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:admin": "npm run dev --prefix next-app",
+    "dev:student": "npm run dev --prefix my-react-app",
+    "dev:server": "npm start --prefix server",
+    "build:admin": "npm run build --prefix next-app",
+    "build:student": "npm run build --prefix my-react-app"
+  }
+}
