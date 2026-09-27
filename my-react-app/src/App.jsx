@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import upangLogo from './assets/upang logo.png'
+import Bexie from './assets/Bexie.jpg'
+import ThoughtLine from './ThoughtLine'
 import './App.css'
 
 const quickPrompts = [
@@ -69,9 +71,13 @@ function getNextId(prefix = 'item') {
 
 export default function App() {
   const [view, setView] = useState('assistant')
+  const [isLoadingHome, setIsLoadingHome] = useState(false)
+  const [userName, setUserName] = useState('')
+  const [userRole, setUserRole] = useState('')
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
   const [isTyping, setIsTyping] = useState(false)
+  const [showThoughtLine, setShowThoughtLine] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeHistoryId, setActiveHistoryId] = useState(null)
   const [historyList, setHistoryList] = useState([
@@ -82,6 +88,43 @@ export default function App() {
 
   const chatEndRef = useRef(null)
   const inputRef = useRef(null)
+  const responseTimerRef = useRef(null)
+  const thoughtHideTimerRef = useRef(null)
+
+  const clearPendingChatTimers = () => {
+    if (responseTimerRef.current) {
+      window.clearTimeout(responseTimerRef.current)
+      responseTimerRef.current = null
+    }
+    if (thoughtHideTimerRef.current) {
+      window.clearTimeout(thoughtHideTimerRef.current)
+      thoughtHideTimerRef.current = null
+    }
+  }
+
+  const enterHome = (name = 'Guest', role = 'Guest') => {
+    setUserName(name)
+    setUserRole(role)
+    setIsLoadingHome(true)
+    window.setTimeout(() => {
+      setView('assistant')
+      setIsLoadingHome(false)
+    }, 1200)
+  }
+
+  const handleAccountAction = () => {
+    if (userName) {
+      clearPendingChatTimers()
+      setMessages([])
+      setInput('')
+      setIsTyping(false)
+      setShowThoughtLine(false)
+      setActiveHistoryId(null)
+      setUserName('')
+      setUserRole('')
+    }
+    setView('login')
+  }
 
   // Scroll to bottom when messages update
   useEffect(() => {
@@ -104,6 +147,11 @@ export default function App() {
     setMessages((prev) => [...prev, userMessage])
     setInput('')
     setIsTyping(true)
+    setShowThoughtLine(true)
+    if (thoughtHideTimerRef.current) {
+      window.clearTimeout(thoughtHideTimerRef.current)
+      thoughtHideTimerRef.current = null
+    }
 
     // Save to history if this is a fresh conversation
     if (messages.length === 0) {
@@ -116,7 +164,7 @@ export default function App() {
     }
 
     // Simulate AI response delay
-    setTimeout(() => {
+    responseTimerRef.current = window.setTimeout(() => {
       const responseData = generateCampusResponse(trimmed)
       const assistantMessage = {
         id: getNextId('asst_msg'),
@@ -127,7 +175,12 @@ export default function App() {
       }
       setMessages((prev) => [...prev, assistantMessage])
       setIsTyping(false)
-    }, 450)
+      responseTimerRef.current = null
+      thoughtHideTimerRef.current = window.setTimeout(() => {
+        setShowThoughtLine(false)
+        thoughtHideTimerRef.current = null
+      }, 900)
+    }, 1400)
   }
 
   const handlePromptClick = (prompt) => {
@@ -135,8 +188,11 @@ export default function App() {
   }
 
   const handleNewConversation = () => {
+    clearPendingChatTimers()
     setMessages([])
     setInput('')
+    setIsTyping(false)
+    setShowThoughtLine(false)
     setActiveHistoryId(null)
     if (window.innerWidth <= 900) {
       setSidebarOpen(false)
@@ -144,7 +200,10 @@ export default function App() {
   }
 
   const handleSelectHistory = (item) => {
+    clearPendingChatTimers()
+    setIsTyping(false)
     setActiveHistoryId(item.id)
+    setShowThoughtLine(false)
     const responseData = generateCampusResponse(item.title)
     setMessages([
       {
@@ -174,12 +233,16 @@ export default function App() {
     }
   }
 
+  if (isLoadingHome) {
+    return <HomeLoadingScreen />
+  }
+
   if (view === 'login') {
-    return <LoginPage onGuest={() => setView('assistant')} onSignUp={() => setView('signup')} />
+    return <LoginPage onGuest={enterHome} onGoogle={enterHome} onSignUp={() => setView('signup')} onEnterHome={enterHome} />
   }
 
   if (view === 'signup') {
-    return <SignupPage onBack={() => setView('login')} />
+    return <SignupPage onBack={() => setView('login')} onGoogle={enterHome} onEnterHome={enterHome} />
   }
 
   return (
@@ -248,14 +311,28 @@ export default function App() {
         <div className="sidebar-links">
           <span>Help</span>
           <span>Settings</span>
+          <span>About</span>
         </div>
 
         <button
-          className="login-btn"
+          className={`login-btn ${userName ? 'account-btn' : ''}`}
           type="button"
-          onClick={() => setView('login')}
+          onClick={handleAccountAction}
+          title={userName ? 'Log out' : 'Log in'}
         >
-          LOG IN
+          {userName ? (
+            <>
+              <span className="account-details">
+                <span className="account-name">Hi, {userName}</span>
+                <span className="account-role">{userRole || 'Guest'}</span>
+              </span>
+              <svg className="logout-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+            </>
+          ) : 'LOG IN'}
         </button>
       </aside>
 
@@ -278,8 +355,7 @@ export default function App() {
             </button>
 
             <div className="campus-badge">
-              <span className="status-dot" aria-hidden="true"></span>
-              <span className="status-text">Si Apple to</span>
+              <span className="status-dot" aria-hidden="true"></span>Upang<span>Ai</span>
             </div>
           </div>
 
@@ -313,10 +389,33 @@ export default function App() {
 
               <header className="welcome-block">
                 <h2>
-                  Welcome to <span>Upang Assist</span>
+                  Welcome, <span>{userName || 'Guest'}</span>
                 </h2>
-                <p className="welcome-tagline">What can I help you today?</p>
+                <p className="welcome-tagline">
+                  What can I help you today?
+                </p>
               </header>
+
+              <div className="welcome-insights" aria-label="Campus assistance overview">
+                <div className="insight-card insight-gold">
+                  <span className="insight-icon">🏛️</span>
+                  <span className="insight-label">Quick Help</span>
+                  <strong>Registrar</strong>
+                  <small>Office hours & TOR requests</small>
+                </div>
+                <div className="insight-card insight-green">
+                  <span className="insight-icon">💳</span>
+                  <span className="insight-label">Payment</span>
+                  <strong>Tuition</strong>
+                  <small>Installments & cashier guidance</small>
+                </div>
+                <div className="insight-card insight-amber">
+                  <span className="insight-icon">🎓</span>
+                  <span className="insight-label">Support</span>
+                  <strong>Scholarships</strong>
+                  <small>Programs & eligibility essentials</small>
+                </div>
+              </div>
 
               <form
                 className="prompt-box"
@@ -377,14 +476,14 @@ export default function App() {
                 >
                   {msg.sender === 'assistant' && (
                     <div className="message-avatar" aria-hidden="true">
-                      <img src={upangLogo} alt="UPang Assistant" className="avatar-torch" />
+                      <img src={Bexie} alt="Bexie" className="avatar-torch" />
                     </div>
                   )}
 
                   <div className="message-bubble-wrap">
                     <div className="message-meta">
                       <span className="sender-name">
-                        {msg.sender === 'user' ? 'You' : 'Upang Assistant'}
+                        {msg.sender === 'user' ? 'You' : 'Bexie'}
                       </span>
                       <span className="message-time">{msg.timestamp}</span>
                     </div>
@@ -427,17 +526,28 @@ export default function App() {
                 </div>
               ))}
 
-              {isTyping && (
+              {(isTyping || showThoughtLine) && (
                 <div className="message-row message-assistant">
                   <div className="message-avatar" aria-hidden="true">
-                    <img src={upangLogo} alt="UPang Assistant" className="avatar-torch" />
+                    <img src={upangLogo} alt="Bexie" className="avatar-torch" />
                   </div>
                   <div className="message-bubble-wrap">
-                    <div className="typing-indicator">
-                      <span className="typing-dot"></span>
-                      <span className="typing-dot"></span>
-                      <span className="typing-dot"></span>
-                    </div>
+                    <ThoughtLine
+                      working={isTyping}
+                      steps={['Reading the question', 'Searching your notes', 'Drafting an answer']}
+                      label="Thinking…"
+                      doneLabel="Thought for"
+                      glyph="sparkle"
+                      fontSize={16}
+                      breathPeriod={2.6}
+                      breathDepth={0.45}
+                      settleDuration={550}
+                      settleBlur={2}
+                      collapsible
+                      collapseOnSettle
+                      showTimer
+                      onSettle={(seconds) => console.log(`thought for ${seconds}s`)}
+                    />
                   </div>
                 </div>
               )}
@@ -493,6 +603,20 @@ export default function App() {
   )
 }
 
+function HomeLoadingScreen() {
+  return (
+    <main className="home-loading" role="status" aria-live="polite">
+      <div className="home-loading-mark">
+        <img src={upangLogo} alt="" className="home-loading-logo" />
+      </div>
+      <p className="home-loading-kicker">UPANG ASSIST</p>
+      <h1>Preparing your campus assistant</h1>
+      <div className="home-loading-bar" aria-hidden="true"><span></span></div>
+      <p className="home-loading-note">Loading your personalized experience...</p>
+    </main>
+  )
+}
+
 // Markdown formatter for clean assistant text display
 function formatMarkdown(text) {
   if (!text) return ''
@@ -537,15 +661,27 @@ function formatMarkdown(text) {
   return result.join('')
 }
 
-function LoginPage({ onGuest, onSignUp }) {
+function GoogleIcon() {
+  return (
+    <svg className="social-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.3-1.6 3.8-5.4 3.8-3.2 0-5.8-2.7-5.8-6s2.6-6 5.8-6c1.8 0 3 .8 3.7 1.5l2.5-2.4C16.7 3.1 14.6 2.2 12 2.2 6.9 2.2 2.8 6.3 2.8 11.4s4.1 9.2 9.2 9.2c5.3 0 8.8-3.7 8.8-8.9 0-.6-.1-1.1-.2-1.5H12Z"/>
+      <path fill="#4285F4" d="M3.7 7.1l3.5 2.6c1-1.9 3.1-3.1 5.8-3.1 1.8 0 3 .8 3.7 1.5l2.5-2.4C16.7 3.1 14.6 2.2 12 2.2c-3.7 0-6.9 2.1-8.3 5.1Z"/>
+      <path fill="#FBBC05" d="M3.8 15.6A9.3 9.3 0 0 1 3.3 11c0-.9.2-1.8.5-2.6L.9 6.1A11.2 11.2 0 0 0 0 11c0 1.8.4 3.5 1.2 5l2.6-1.4Z"/>
+      <path fill="#34A853" d="M12 21.7c2.5 0 4.5-.8 6-2.2l-2.9-2.4c-.8.5-1.9.9-3.1.9-2.7 0-4.9-1.9-5.4-4.3l-3 2.3A9.2 9.2 0 0 0 12 21.7Z"/>
+    </svg>
+  )
+}
+
+function LoginPage({ onGuest, onGoogle, onSignUp, onEnterHome }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-
   const handleSubmit = (event) => {
     event.preventDefault()
-    setSubmitted(true)
+    const displayName = email.split('@')[0]
+      .replace(/[._-]+/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    onEnterHome(displayName || 'Student', 'Student')
   }
 
   return (
@@ -556,19 +692,30 @@ function LoginPage({ onGuest, onSignUp }) {
           <div className="visual-emblem-badge">
             <img src={upangLogo} alt="PHINMA UPang Logo" className="visual-logo-img" />
           </div>
-          <span>PHINMA</span>
-          <strong>University of Pangasinan</strong>
+          <span>University of Pangasinan</span>
+          <strong>UpangAssist</strong>
+          <p className="login-campus-label">DAGUPAN CITY CAMPUS</p>
+          <p className="login-campus-description">
+            Your digital campus assistant for<br />
+            PHINMA University of Pangasinan.
+          </p>
         </div>
       </section>
 
       <section className="login-panel">
+        <div className="login-panel-topbar">
+          <div className="login-mode-switch" aria-label="Account mode">
+            <span className="active">Log In</span>
+            <button type="button" onClick={onSignUp}>Sign Up</button>
+          </div>
+        </div>
         <div className="login-content">
-          <p className="login-kicker">WELCOME!</p>
-          <h1>To <span>Upang Assist</span></h1>
-          <h2>Log In</h2>
+          <p className="login-kicker">STUDENT & FACULTY PORTAL</p>
+          <h1>Welcome Back to <span>Upang Assist</span></h1>
+          <p className="login-description">Enter your official credentials to access personalized campus records.</p>
 
           <form className="login-form" onSubmit={handleSubmit}>
-            <label htmlFor="email">Email Address:</label>
+            <label htmlFor="email">Student Email Address</label>
             <div className="input-with-icon">
               <svg className="field-prefix-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
@@ -577,7 +724,7 @@ function LoginPage({ onGuest, onSignUp }) {
               <input
                 id="email"
                 type="email"
-                placeholder="student@gmail.com"
+                placeholder="student@up.phinma.edu.ph"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 required
@@ -621,29 +768,37 @@ function LoginPage({ onGuest, onSignUp }) {
               </button>
             </div>
 
+            <label className="remember-row">
+              <input type="checkbox" />
+              Remember this device
+            </label>
+
             <button className="login-submit" type="submit">Log In</button>
           </form>
 
           <div className="login-divider"><span>Or Continue With:</span></div>
 
           <div className="social-login">
-            <button type="button" onClick={() => alert('Google login')}><strong>G</strong> Google</button>
-            <button type="button" onClick={onGuest}>Guest</button>
+            <button type="button" className="google-login-btn" onClick={() => onGoogle ? onGoogle() : onEnterHome('Google User', 'Student')}>
+              <GoogleIcon />
+              Continue with Google
+            </button>
+            <button type="button" onClick={() => onGuest()}><strong className="guest-mark">✣</strong> Continue as Guest</button>
           </div>
 
           <p className="login-footer">
-            Don't have an account? <button type="button" onClick={onSignUp}>Sign Up</button>
+            Don't have an account yet? <button type="button" onClick={onSignUp}>Sign Up Now</button>
           </p>
-          {submitted && <p className="login-status" role="status">Login details ready to submit.</p>}
         </div>
       </section>
     </main>
   )
 }
 
-function SignupPage({ onBack }) {
+function SignupPage({ onBack, onGoogle, onEnterHome }) {
   const [form, setForm] = useState({
     fullName: '',
+    role: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -652,8 +807,6 @@ function SignupPage({ onBack }) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [acceptedPrivacy, setAcceptedPrivacy] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-
   const handleChange = (event) => {
     const { name, value } = event.target
     setForm((currentForm) => ({ ...currentForm, [name]: value }))
@@ -661,7 +814,7 @@ function SignupPage({ onBack }) {
 
   const handleSubmit = (event) => {
     event.preventDefault()
-    setSubmitted(true)
+    onEnterHome(form.fullName.trim() || 'Student', form.role === 'faculty' ? 'Faculty Member' : 'Student')
   }
 
   return (
@@ -672,19 +825,37 @@ function SignupPage({ onBack }) {
           <div className="visual-emblem-badge">
             <img src={upangLogo} alt="PHINMA UPang Logo" className="visual-logo-img" />
           </div>
-          <span>PHINMA</span>
-          <strong>University of Pangasinan</strong>
+          <span>University of Pangasinan</span>
+          <strong>UpangAssist</strong>
+          <p className="login-campus-label">DAGUPAN CITY CAMPUS</p>
+          <p className="login-campus-description">
+            Your digital campus assistant for<br />
+            PHINMA University of Pangasinan
+          </p>
         </div>
       </section>
 
       <section className="login-panel">
-        <button className="login-back-btn" type="button" onClick={onBack} aria-label="Back to login">
-          <span className="back-arrow">←</span>
-          <span>Back to Login</span>
-        </button>
+        <div className="login-panel-topbar">
+          <div className="login-mode-switch" aria-label="Account mode">
+            <button type="button" onClick={onBack}>Log In</button>
+            <span className="active">Sign Up</span>
+          </div>
+        </div>
 
         <div className="login-content signup-content">
+          <p className="login-kicker">GET STARTED</p>
           <h2>Sign Up</h2>
+          <p className="login-description">Create your account to get helpful answers about campus life.</p>
+
+          <div className="social-login signup-social-login">
+            <button type="button" className="google-login-btn" onClick={() => onGoogle ? onGoogle() : onEnterHome('Google User', 'Student')}>
+              <GoogleIcon />
+              Sign up with Google
+            </button>
+          </div>
+
+          <div className="login-divider"><span>Or sign up with email</span></div>
 
           <form className="login-form" onSubmit={handleSubmit}>
             <label htmlFor="full-name">Full Name:</label>
@@ -702,6 +873,27 @@ function SignupPage({ onBack }) {
                 onChange={handleChange}
                 required
               />
+            </div>
+
+            <label htmlFor="signup-role">I am a:</label>
+            <div className="input-with-icon signup-select-wrap">
+              <svg className="field-prefix-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+              <select
+                id="signup-role"
+                name="role"
+                value={form.role}
+                onChange={handleChange}
+                required
+              >
+                <option value="" disabled>Select your role</option>
+                <option value="student">Student</option>
+                <option value="faculty">Faculty Member</option>
+              </select>
             </div>
 
             <label htmlFor="signup-email">Email Address:</label>
@@ -791,7 +983,7 @@ function SignupPage({ onBack }) {
               </button>
             </div>
 
-            <button className="login-submit signup-submit" type="submit">SIGN IN</button>
+            <button className="login-submit signup-submit" type="submit">CREATE ACCOUNT</button>
           </form>
 
           <div className="terms-row">
@@ -808,7 +1000,9 @@ function SignupPage({ onBack }) {
           <p className="agreement-copy">
             By signing in you agree to our <strong>Terms and Privacy Policy</strong>
           </p>
-          {submitted && <p className="login-status" role="status">Sign-up details ready to submit.</p>}
+          <p className="login-footer signup-login-footer">
+            You have an account? <button type="button" onClick={onBack}>Log In</button>
+          </p>
         </div>
       </section>
     </main>
