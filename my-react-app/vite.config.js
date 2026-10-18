@@ -5,6 +5,10 @@ import process from 'node:process'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    globals: true,
+  },
   server: {
     proxy: {
       '/api': {

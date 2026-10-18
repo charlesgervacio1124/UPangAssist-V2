@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react'
-import { AdminNavbar } from './components/AdminNavbar'
-import { AdminSidebar, type AdminTab } from './components/AdminSidebar'
+import { Navbar } from './components/Navbar'
+import { Sidebar } from './components/Sidebar'
 import { DashboardView } from './components/DashboardView'
 import { KnowledgeBaseView } from './components/KnowledgeBaseView'
 import { InquiriesView } from './components/InquiriesView'
 import { UsersView } from './components/UsersView'
 import { SettingsView } from './components/SettingsView'
-import { AdminLogin } from './components/AdminLogin'
 import upangLogo from './assets/upang logo.png'
 import {
   INITIAL_KNOWLEDGE,
@@ -14,7 +13,7 @@ import {
   INITIAL_USERS,
   INITIAL_SETTINGS,
 } from './data/mockData'
-import type { KnowledgeItem, InquiryLog, UserAccount, SystemSettings } from './types'
+import type { KnowledgeItem, InquiryLog, UserAccount, SystemSettings, AdminTab } from './types'
 
 // Automatic versioned reset to guarantee a completely fresh "like new" state on load
 const FRESH_VERSION = 'upang_admin_v9_full_reset'
@@ -42,12 +41,9 @@ export function App() {
     return () => window.clearTimeout(timeout)
   }, [])
 
-  // Auth State
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('upang_admin_auth') === 'true'
-  })
-  const [adminName, setAdminName] = useState<string>(() => {
-    return localStorage.getItem('upang_admin_name') || 'Engr. Jeremy'
+  const [userName] = useState<string>(() => {
+    const isAuthenticated = localStorage.getItem('upang_admin_auth') === 'true'
+    return isAuthenticated ? localStorage.getItem('upang_admin_name') || 'Guest' : 'Guest'
   })
 
   // Navigation State
@@ -94,20 +90,6 @@ export function App() {
   useEffect(() => {
     localStorage.setItem('upang_settings_data', JSON.stringify(settings))
   }, [settings])
-
-  // Login handler
-  const handleLogin = (name: string) => {
-    setIsAuthenticated(true)
-    setAdminName(name)
-    localStorage.setItem('upang_admin_auth', 'true')
-    localStorage.setItem('upang_admin_name', name)
-  }
-
-  // Logout handler
-  const handleLogout = () => {
-    setIsAuthenticated(false)
-    localStorage.removeItem('upang_admin_auth')
-  }
 
   // Knowledge base actions
   const handleAddKnowledge = (
@@ -223,23 +205,20 @@ export function App() {
     )
   }
 
-  if (!isAuthenticated) {
-    return <AdminLogin onLoginSuccess={handleLogin} />
-  }
-
   return (
     <div className="min-h-screen flex flex-col font-sans text-white">
       {/* Top Navbar */}
-      <AdminNavbar
-        adminName={adminName}
-        onLogout={handleLogout}
+      <Navbar
+        userName={userName}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onResetLikeNew={handleResetDefaults}
+        inquiriesCount={inquiries.filter((i) => i.status !== 'Resolved').length}
+        onNavigateTab={(tab) => setCurrentTab(tab)}
       />
 
       <div className="flex flex-1">
         {/* Sidebar */}
-        <AdminSidebar
+        <Sidebar
           currentTab={currentTab}
           onSelectTab={(tab) => setCurrentTab(tab)}
           isOpen={sidebarOpen}

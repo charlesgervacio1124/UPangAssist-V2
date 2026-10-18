@@ -8,7 +8,7 @@ import {
   Plus,
 } from 'lucide-react'
 import type { InquiryLog, KnowledgeItem } from '../types'
-import type { AdminTab } from './AdminSidebar'
+import type { AdminTab } from '../types'
 
 interface DashboardViewProps {
   inquiries: InquiryLog[]

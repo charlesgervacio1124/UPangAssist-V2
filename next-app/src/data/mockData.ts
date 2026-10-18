@@ -9,7 +9,7 @@ export const INITIAL_USERS: UserAccount[] = []
 export const INITIAL_SETTINGS: SystemSettings = {
   botName: 'Bexie (UPang AI Assistant)',
   botRole: 'Campus Information & Academic Navigation Assistant',
-  aiGreeting: 'Hello, Wildcat! I am here to assist you with anything regarding PHINMA University of Pangasinan.',
+  aiGreeting: 'Hello, Guest! I am here to assist you with anything regarding PHINMA University of Pangasinan.',
   aiFallbackResponse: "I am not completely certain about this specific detail. Would you like me to connect you with the appropriate University office or provide their window contact hours?",
   temperature: 0.35,
   escalationEmailRegistrar: 'registrar.up@phinmaed.com',

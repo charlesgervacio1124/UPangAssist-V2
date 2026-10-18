@@ -1,3 +1,5 @@
+export type AdminTab = 'dashboard' | 'knowledge' | 'inquiries' | 'users' | 'settings'
+
 export type Category =
   | 'Registrar & Records'
   | 'Tuition & Cashier'
