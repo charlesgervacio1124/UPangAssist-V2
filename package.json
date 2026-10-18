@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev:student": "npm run dev --prefix my-react-app",
+    "dev:admin": "npm run dev --prefix next-app",
     "dev:server": "npm start --prefix server",
     "build:student": "npm run build --prefix my-react-app"
   }

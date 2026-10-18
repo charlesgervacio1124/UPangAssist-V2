@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { ExternalLink, ShieldCheck, Search, RotateCcw, Bell, Check, MessageSquareText, AlertCircle, Sparkles } from 'lucide-react'
+import { ExternalLink, ShieldCheck, Search, RotateCcw, Bell, Check, MessageSquareText, AlertCircle, Sparkles, LogOut } from 'lucide-react'
 import upangLogo from '../assets/upang logo.png'
 import type { AdminTab } from '../types'
 
@@ -9,6 +9,7 @@ interface NavbarProps {
   onResetLikeNew?: () => void
   inquiriesCount?: number
   onNavigateTab?: (tab: AdminTab) => void
+  onLogout?: () => void
 }
 
 interface StaffNotif {
@@ -21,35 +22,7 @@ interface StaffNotif {
   type: 'inquiry' | 'alert' | 'system'
 }
 
-const DEFAULT_STAFF_NOTIFS: StaffNotif[] = [
-  {
-    id: 'sn-1',
-    title: 'Student Inquiry Pending',
-    desc: 'New question regarding Hawak Kamay scholarship requirements needs review.',
-    time: '5m ago',
-    unread: true,
-    tab: 'inquiries',
-    type: 'inquiry',
-  },
-  {
-    id: 'sn-2',
-    title: 'Escalation Alert',
-    desc: 'Tuition installment calculation query escalated to Cashier window.',
-    time: '20m ago',
-    unread: true,
-    tab: 'inquiries',
-    type: 'alert',
-  },
-  {
-    id: 'sn-3',
-    title: 'Knowledge Base Synced',
-    desc: 'Campus Registrar FAQs successfully synchronized with the student chatbot.',
-    time: '2h ago',
-    unread: false,
-    tab: 'knowledge',
-    type: 'system',
-  },
-]
+const DEFAULT_STAFF_NOTIFS: StaffNotif[] = []
 
 export const Navbar: React.FC<NavbarProps> = ({
   userName = 'Engr. Jeremy',
@@ -57,6 +30,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onResetLikeNew,
   inquiriesCount = 2,
   onNavigateTab,
+  onLogout,
 }) => {
   const [notifs, setNotifs] = useState<StaffNotif[]>(DEFAULT_STAFF_NOTIFS)
   const [isOpen, setIsOpen] = useState(false)
@@ -232,6 +206,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             aria-label="Reset All Data Like New"
           >
             <RotateCcw className="w-4 h-4" />
+          </button>
+        )}
+        {onLogout && (
+          <button
+            type="button"
+            onClick={onLogout}
+            className="p-2 rounded-xl text-white/70 hover:text-[#f0b445] hover:bg-white/10 transition-colors"
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         )}
 

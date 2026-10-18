@@ -3,12 +3,58 @@ require("dotenv").config();
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
 const mongoose = require("mongoose");
+const { Server } = require("socket.io");
 const taskRoutes = require("./routes/taskRoutes");
+const authRoutes = require("./routes/authRoutes");
+const supportRoutes = require("./routes/supportRoutes");
+const User = require("./models/User");
+const { hashPassword, verifyToken, getTokenSecretStatus } = require("./auth");
 const { findSemanticReferences } = require("./semanticSearch");
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "128kb" }));
+const httpServer = http.createServer(app);
+const allowedOrigins = new Set(
+  (process.env.CLIENT_ORIGINS || "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
+const io = new Server(httpServer, {
+  cors: {
+    origin(origin, callback) {
+      callback(null, !origin || allowedOrigins.has(origin));
+    }
+  }
+});
+app.set("io", io);
+
+if (!getTokenSecretStatus()) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUTH_TOKEN_SECRET must be configured with at least 32 bytes in production.");
+  }
+  console.warn("AUTH_TOKEN_SECRET is not set; local sessions will expire when the server restarts.");
+}
+
+io.use(async (socket, next) => {
+  const claims = verifyToken(socket.handshake.auth?.token);
+  if (!claims) return next(new Error("Authentication required"));
+  try {
+    const user = await User.findById(claims.sub).select("_id accountType");
+    if (!user || user.accountType !== claims.role) return next(new Error("Authentication required"));
+    socket.data.user = { id: String(user._id), accountType: user.accountType };
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+io.on("connection", (socket) => {
+  if (socket.data.user.accountType === "admin") socket.join("admins");
+  else socket.join(`user:${socket.data.user.id}`);
+});
 
 function getKnowledgeBase() {
   const filePath = path.join(__dirname, "../data/knowledgeBase.json");
@@ -16,10 +62,11 @@ function getKnowledgeBase() {
 }
 
 const ignoredSearchWords = new Set([
-  "about", "after", "also", "and", "are", "can", "could", "does", "for",
-  "from", "how", "is", "it", "me", "my", "of", "please", "the", "there",
-  "this", "to", "what", "when", "where", "which", "who", "with", "would",
-  "you", "your", "campus", "student", "students"
+  "about", "after", "also", "and", "are", "can", "could", "detail", "details",
+  "does", "for", "from", "how", "information", "is", "it", "me", "my", "of",
+  "please", "policies", "policy", "process", "procedure", "requirement", "requirements",
+  "service", "services", "the", "there", "this", "to", "what", "when", "where",
+  "which", "who", "with", "would", "you", "your", "campus", "student", "students"
 ]);
 
 const searchWordAliases = {
@@ -28,7 +75,9 @@ const searchWordAliases = {
   clothes: ["dress", "uniform"],
   clothing: ["dress", "uniform"],
   aid: ["scholarship", "financial"],
-  hk: ["hawak", "kamay", "scholarship"]
+  hk: ["hawak", "kamay", "scholarship"],
+  transcript: ["records", "registrar"],
+  transcripts: ["records", "registrar"]
 };
 
 function getSearchWords(value) {
@@ -49,6 +98,12 @@ function normalizeSearchWord(word) {
   return word;
 }
 
+function hasTopicMatch(words, reference) {
+  const questionWords = new Set(getSearchWords(reference.question).map(normalizeSearchWord));
+  const categoryWords = new Set(getSearchWords(reference.category).map(normalizeSearchWord));
+  return words.some((word) => questionWords.has(word) || categoryWords.has(word));
+}
+
 function findRelevantReferences(question) {
   const words = [...new Set(getSearchWords(question).map(normalizeSearchWord))];
 
@@ -59,6 +114,7 @@ function findRelevantReferences(question) {
       const answerWords = new Set(getSearchWords(reference.answer).map(normalizeSearchWord));
       const officeWords = new Set(getSearchWords(reference.office).map(normalizeSearchWord));
       const sourceWords = new Set(getSearchWords(reference.source).map(normalizeSearchWord));
+      const topicMatch = words.some((word) => questionWords.has(word) || categoryWords.has(word));
       const score = words.reduce((total, word) => {
         const wordScore = Math.max(
           questionWords.has(word) ? 8 : 0,
@@ -69,9 +125,9 @@ function findRelevantReferences(question) {
         );
         return total + (wordScore > 0 ? wordScore + 4 : 0);
       }, 0);
-      return { reference, score };
+      return { reference, score, topicMatch };
     })
-    .filter((item) => item.score > 0)
+    .filter((item) => item.topicMatch && item.score >= 12)
     .sort((first, second) => second.score - first.score)
     .slice(0, 3)
     .map((item) => item.reference);
@@ -139,12 +195,33 @@ function formatReferences(references) {
 }
 
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.has(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Vary", "Origin");
+  }
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
+
+const ESCALATION_PROMPT = "I’m sorry, but I couldn’t find a reliable answer to your question. Would you like to connect with our support team for further assistance?";
+const humanAssistancePattern = /\b(?:human|person|real person|live chat|support agent|talk to (?:someone|a person|support)|speak to (?:someone|a person|support)|contact (?:an? )?(?:admin|administrator|staff|support))\b/i;
+const inconclusiveAnswerPattern = /\b(?:no (?:verified )?(?:upang )?(?:reference|information|answer)|not enough (?:verified )?(?:information|detail)|cannot (?:find|provide|verify)|could(?: not|n't) find (?:a )?(?:reliable|verified|matching)|i don'?t have enough|i am not sure|i'?m not sure)\b/i;
+
+function isInconclusiveAnswer(text) {
+  return !text || inconclusiveAnswerPattern.test(text);
+}
+
+function sendEscalationResponse(res, wantStream) {
+  if (wantStream) {
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("X-UPang-Escalation", "true");
+    return res.end(ESCALATION_PROMPT);
+  }
+  return res.json({ text: ESCALATION_PROMPT, escalate: true });
+}
 
 async function streamAnswerWithOllama(question, referenceContext, res) {
   const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
@@ -180,12 +257,10 @@ ${referenceContext}`;
     throw new Error(`Ollama request failed (${response.status}): ${errorText}`);
   }
 
-  res.setHeader("Content-Type", "text/plain; charset=utf-8");
-  res.setHeader("Transfer-Encoding", "chunked");
-
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let answer = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -199,10 +274,10 @@ ${referenceContext}`;
       try {
         const parsed = JSON.parse(line);
         if (parsed.message?.content) {
-          res.write(parsed.message.content);
+          answer += parsed.message.content;
         }
       } catch {
-        // ignore incomplete JSON chunk
+        // Ollama streams complete JSON objects, but partial lines can arrive between reads.
       }
     }
   }
@@ -211,14 +286,20 @@ ${referenceContext}`;
     try {
       const parsed = JSON.parse(buffer);
       if (parsed.message?.content) {
-        res.write(parsed.message.content);
+        answer += parsed.message.content;
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn("Ignoring incomplete final Ollama stream chunk:", error.message);
     }
   }
 
-  res.end();
+  if (isInconclusiveAnswer(answer)) return sendEscalationResponse(res, true);
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Transfer-Encoding", "chunked");
+  for (let index = 0; index < answer.length; index += 48) {
+    res.write(answer.slice(index, index + 48));
+  }
+  return res.end();
 }
 
 async function generateAnswerWithOllama(question, referenceContext) {
@@ -265,18 +346,26 @@ app.post("/api/chat", async (req, res) => {
   if (!question) {
     return res.status(400).json({ error: "question is required" });
   }
-
-  const unverifiedBuilding = findUnverifiedBuildingName(question);
-  if (unverifiedBuilding) {
-    const message = `I do not have a verified UPang reference for the ${unverifiedBuilding} Building location. Please contact Campus Administration or the relevant college office for the current location.`;
-    if (wantStream) {
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      return res.end(message);
-    }
-    return res.json({ text: message, provider: "verified_reference_check" });
+  if (question.length > 2000) {
+    return res.status(400).json({ error: "question must be 2000 characters or fewer" });
+  }
+  if (humanAssistancePattern.test(question)) {
+    return sendEscalationResponse(res, wantStream);
   }
 
-  const specificBuilding = findSpecificBuildingReference(question);
+  let unverifiedBuilding;
+  let specificBuilding;
+  try {
+    unverifiedBuilding = findUnverifiedBuildingName(question);
+    specificBuilding = unverifiedBuilding ? null : findSpecificBuildingReference(question);
+  } catch (error) {
+    console.error("Knowledge base retrieval failed:", error.message);
+    return sendEscalationResponse(res, wantStream);
+  }
+  if (unverifiedBuilding) {
+    return sendEscalationResponse(res, wantStream);
+  }
+
   if (specificBuilding) {
     const specificBuildingText = `${specificBuilding.answer}\n\n*Source: ${specificBuilding.source || "UPang Campus Directory"} (${specificBuilding.page || "Campus Map"})*`;
     if (wantStream) {
@@ -287,12 +376,19 @@ app.post("/api/chat", async (req, res) => {
   }
 
   // Semantic search handles paraphrases; keyword search remains a safe fallback.
-  let references = findRelevantReferences(question);
+  let references = [];
   try {
-    const semanticReferences = await findSemanticReferences(question, getKnowledgeBase());
+    references = findRelevantReferences(question);
+    const semanticWords = [...new Set(getSearchWords(question).map(normalizeSearchWord))];
+    const semanticReferences = (await findSemanticReferences(question, getKnowledgeBase()))
+      .filter((reference) => hasTopicMatch(semanticWords, reference));
     if (semanticReferences.length > 0) references = semanticReferences;
   } catch (error) {
-    console.warn("Semantic search unavailable; using keyword search:", error.message);
+    console.warn("Knowledge retrieval unavailable; using keyword search:", error.message);
+    if (references.length === 0) return sendEscalationResponse(res, wantStream);
+  }
+  if (references.length === 0) {
+    return sendEscalationResponse(res, wantStream);
   }
   const referenceContext = formatReferences(references);
   const provider = (process.env.LLM_PROVIDER || "ollama").toLowerCase();
@@ -313,42 +409,72 @@ app.post("/api/chat", async (req, res) => {
     }
 
     if (!text) {
-      return res.status(502).json({ error: "Chatbot returned an empty answer" });
+      return sendEscalationResponse(res, wantStream);
     }
 
-    return res.json({ text, provider });
+    if (isInconclusiveAnswer(text)) return sendEscalationResponse(res, wantStream);
+    return res.json({ text, provider, escalate: false });
   } catch (error) {
     console.error(`Chat error (${provider}):`, error.message);
 
-    // If local LLM is starting up or temporarily unavailable, use direct reference fallback
+    // Use verified knowledge-base content if the optional local model is unavailable.
     if (references.length > 0) {
       const top = references[0];
       const fallbackText = `${top.answer}\n\n*Office: ${top.office || "Official Office"} | Source: ${top.source || "Official UPang Guidelines"}*`;
+      if (isInconclusiveAnswer(fallbackText)) return sendEscalationResponse(res, wantStream);
       if (wantStream) {
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         return res.end(fallbackText);
       }
-      return res.json({ text: fallbackText, fallback: true });
+      return res.json({ text: fallbackText, fallback: true, escalate: false });
     }
 
-    // Keep the chat usable when the optional AI provider is offline and the
-    // question has no matching knowledge-base entry.
-    const unavailableText = "I couldn't find a verified UPang answer for that question right now. I can help with enrollment, Registrar services, tuition payments, scholarships, campus locations, and student wellness services. For other concerns, please contact the appropriate official UPang office.";
-    if (wantStream) {
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      return res.end(unavailableText);
-    }
-    return res.json({ text: unavailableText, fallback: true });
+    return sendEscalationResponse(res, wantStream);
   }
 });
 
+async function provisionConfiguredAdmin() {
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD;
+  if (!email && !password) return;
+  if (!email || !password || password.length < 12) {
+    throw new Error("Set both ADMIN_EMAIL and an ADMIN_PASSWORD of at least 12 characters.");
+  }
+  const existing = await User.findOne({ email });
+  if (existing) {
+    if (existing.accountType !== "admin") {
+      throw new Error("ADMIN_EMAIL is already registered as a non-administrator account.");
+    }
+    return;
+  }
+  await User.create({
+    name: process.env.ADMIN_NAME?.trim() || "UPang Support Administrator",
+    email,
+    passwordHash: hashPassword(password),
+    accountType: "admin"
+  });
+  console.log("Configured support administrator provisioned.");
+}
+
 mongoose
   .connect(process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/upang-assist")
-  .then(() => console.log("MongoDB connected"))
+  .then(async () => {
+    await provisionConfiguredAdmin();
+    console.log("MongoDB connected");
+  })
   .catch((err) => console.error("MongoDB connection error:", err.message));
 
 app.use("/api/tasks", taskRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/support", supportRoutes);
 
-app.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
+app.use((error, _req, res, _next) => {
+  console.error("API request failed:", error.message);
+  if (res.headersSent) return;
+  return res.status(500).json({ error: "The request could not be completed. Please try again." });
+});
+
+const port = Number(process.env.PORT || 3000);
+httpServer.listen(port, () => {
+  console.log(`Server running on http://localhost:${port}`);
 });

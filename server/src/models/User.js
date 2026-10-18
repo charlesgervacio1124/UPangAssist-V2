@@ -14,10 +14,27 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true
     },
+    googleId: {
+      type: String,
+      unique: true,
+      sparse: true,
+      select: false
+    },
     course: {
       type: String,
-      required: true,
+      default: "",
       trim: true
+    },
+    accountType: {
+      type: String,
+      enum: ["student", "employee", "admin"],
+      default: "student",
+      required: true
+    },
+    passwordHash: {
+      type: String,
+      required: true,
+      select: false
     }
   },
   {

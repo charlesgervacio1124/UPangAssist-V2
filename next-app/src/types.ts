@@ -31,8 +31,19 @@ export interface InquiryLog {
   category: Category
   timestamp: string
   rating: number // 1 to 5
-  status: 'Resolved' | 'Escalated' | 'Pending Review'
-  escalatedTo?: string
+  status: 'Waiting for Support' | 'Assigned' | 'Live Chat' | 'Resolved' | 'Ended by Student'
+  conversationId: string
+  assignedTo: string | null
+  messages: SupportMessage[]
+}
+
+export interface SupportMessage {
+  _id?: string
+  clientMessageId: string
+  sender: 'student' | 'assistant' | 'admin'
+  senderName: string
+  text: string
+  createdAt: string
 }
 
 export interface UserAccount {

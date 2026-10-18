@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { io } from 'socket.io-client'
 import upangLogo from './assets/upang logo.png'
 import upangCampus from './assets/UpangCampus.jpg'
 import ThoughtLine from './ThoughtLine'
@@ -129,6 +130,32 @@ const collegeCourses = [
 // Use the same origin in production. During local development, Vite proxies
 // this path to the API server (see vite.config.js).
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+const socketBaseUrl = import.meta.env.VITE_SOCKET_URL
+  || (apiBaseUrl.startsWith('http') ? new URL(apiBaseUrl).origin : undefined)
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+
+async function parseAuthResponse(response, failureMessage) {
+  let data
+  try {
+    const body = await response.text()
+    if (!body.trim()) throw new Error('empty response')
+    data = JSON.parse(body)
+  } catch {
+    throw new Error(
+      'The UPangAssist API returned an empty or invalid response. Start the backend in another terminal with "npm run dev:server", then try again.'
+    )
+  }
+
+  if (!response.ok) throw new Error(data.error || failureMessage)
+  return data
+}
+
+function getAuthErrorMessage(error, failureMessage) {
+  if (error instanceof TypeError) {
+    return 'Cannot connect to the UPangAssist API. Start the backend in another terminal with "npm run dev:server", then try again.'
+  }
+  return error.message || failureMessage
+}
 
 // Audio chime for response completion
 function playCompletionChime() {
@@ -266,6 +293,15 @@ export default function App() {
   const [userRole, setUserRole] = useState('')
   const [userCourse, setUserCourse] = useState('')
   const [userPhoto, setUserPhoto] = useState('')
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('upang_auth_token') || '')
+  const [authRestoring, setAuthRestoring] = useState(() => Boolean(localStorage.getItem('upang_auth_token')))
+  const [supportConversation, setSupportConversation] = useState(null)
+  const [supportBusy, setSupportBusy] = useState(false)
+  const [supportPanelOpen, setSupportPanelOpen] = useState(false)
+  const [supportDraft, setSupportDraft] = useState('')
+  const [supportUnreadCount, setSupportUnreadCount] = useState(0)
+  const [confirmEndSupport, setConfirmEndSupport] = useState(false)
+  const [endingSupport, setEndingSupport] = useState(false)
   const [profileDraft, setProfileDraft] = useState({ name: '', course: '', photo: '' })
   const [profileError, setProfileError] = useState('')
   const [profileSaved, setProfileSaved] = useState(false)
@@ -281,12 +317,132 @@ export default function App() {
   const [dismissedAlert, setDismissedAlert] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const authTransitionTimerRef = useRef(null)
+  const supportSocketRef = useRef(null)
+  const supportConversationRef = useRef(supportConversation)
+  const supportPanelOpenRef = useRef(supportPanelOpen)
+
+  useEffect(() => {
+    supportConversationRef.current = supportConversation
+  }, [supportConversation])
+
+  useEffect(() => {
+    supportPanelOpenRef.current = supportPanelOpen
+  }, [supportPanelOpen])
 
   useEffect(() => () => {
     if (authTransitionTimerRef.current) {
       window.clearTimeout(authTransitionTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (!authToken) return undefined
+    let cancelled = false
+    fetch(`${apiBaseUrl}/auth/me`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Your saved sign-in has expired. Please sign in again.')
+        return response.json()
+      })
+      .then(async ({ user }) => {
+        if (cancelled) return
+        setUserName(user.name)
+        setUserRole(user.accountType === 'student' ? 'Student' : user.accountType === 'employee' ? 'Employee' : user.accountType)
+        setUserCourse(user.course || '')
+        setView('assistant')
+        try {
+          const response = await fetch(`${apiBaseUrl}/support/mine`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          })
+          if (!response.ok) throw new Error('Could not restore your support conversation.')
+          const { conversation } = await response.json()
+          if (!cancelled && conversation) {
+            setSupportConversation(conversation)
+          }
+        } catch (error) {
+          console.error('Support conversation recovery failed:', error)
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return
+        console.error('Sign-in recovery failed:', error)
+        localStorage.removeItem('upang_auth_token')
+        setAuthToken('')
+        setAuthRestoring(false)
+      })
+      .finally(() => {
+        if (!cancelled) setAuthRestoring(false)
+      })
+    return () => { cancelled = true }
+  }, [authToken])
+
+  useEffect(() => {
+    if (!authToken) return undefined
+    const socket = io(socketBaseUrl, {
+      auth: { token: authToken },
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+    })
+    supportSocketRef.current = socket
+    socket.on('connect', async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/support/mine`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        })
+        if (!response.ok) throw new Error('Could not restore your support conversation.')
+        const { conversation } = await response.json()
+        if (!conversation) return
+        const pending = (supportConversationRef.current?.messages || [])
+          .filter((message) => message.pending)
+        const restoredIds = new Set(conversation.messages.map((message) => message.clientMessageId))
+        const unsent = pending.filter((message) => !restoredIds.has(message.clientMessageId))
+        setSupportConversation({ ...conversation, messages: [...conversation.messages, ...unsent] })
+        for (const message of unsent) {
+          try {
+            const sendResponse = await fetch(`${apiBaseUrl}/support/${conversation._id}/messages`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${authToken}`,
+              },
+              body: JSON.stringify({ text: message.text, clientMessageId: message.clientMessageId }),
+            })
+            const data = await sendResponse.json()
+            if (!sendResponse.ok) throw new Error(data.error || 'Retrying a support message failed.')
+            setSupportConversation(data.conversation)
+          } catch (error) {
+            console.error('Pending support message retry failed:', error)
+          }
+        }
+      } catch (error) {
+        console.error('Support recovery after reconnect failed:', error)
+      }
+    })
+    socket.on('support:status', ({ id, status }) => {
+      setSupportConversation((current) => {
+        if (!current || String(current._id) !== id) return current
+        return { ...current, status }
+      })
+    })
+    socket.on('support:message', ({ conversationId, message }) => {
+      setSupportConversation((current) => {
+        if (!current || String(current._id) !== conversationId) return current
+        const exists = current.messages.some((entry) => entry.clientMessageId === message.clientMessageId)
+        return exists ? current : { ...current, status: 'live_chat', messages: [...current.messages, message] }
+      })
+      if (message.sender === 'admin' && !supportPanelOpenRef.current) {
+        setSupportUnreadCount((count) => count + 1)
+      }
+    })
+    socket.on('connect_error', (error) => {
+      console.error('Live support connection failed:', error.message)
+    })
+    return () => {
+      socket.disconnect()
+      supportSocketRef.current = null
+    }
+  }, [authToken])
 
   // Notification center state (persisted to localStorage)
   const [notifications, setNotifications] = useState(() => {
@@ -492,13 +648,21 @@ export default function App() {
 
   const enterHome = (name = 'Guest', role = 'Guest', course = '') => {
     setUserName(name)
-    setUserRole(role)
+    setUserRole(role === 'student' ? 'Student' : role === 'employee' ? 'Employee' : role)
     setUserCourse(course)
     setIsLoadingHome(true)
     window.setTimeout(() => {
       setView('assistant')
       setIsLoadingHome(false)
     }, 1200)
+  }
+
+  const completeSignIn = (session) => {
+    localStorage.setItem('upang_auth_token', session.token)
+    setAuthToken(session.token)
+    setSupportConversation(null)
+    setMessages([])
+    enterHome(session.user.name, session.user.accountType, session.user.course || '')
   }
 
   const handleProfilePhotoChange = (event) => {
@@ -544,6 +708,10 @@ export default function App() {
 
   const handleAccountAction = () => {
     if (userName) {
+      localStorage.removeItem('upang_auth_token')
+      setAuthToken('')
+      setSupportConversation(null)
+      supportSocketRef.current?.disconnect()
       clearPendingChatTimers()
       setMessages([])
       setInput('')
@@ -572,7 +740,7 @@ export default function App() {
     if (!trimmed || isTyping) return
 
     const userMessage = {
-      id: getNextId('user_msg'),
+      id: createClientId('user_msg'),
       sender: 'user',
       text: trimmed,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -598,7 +766,7 @@ export default function App() {
       setActiveHistoryId(newHistoryItem.id)
     }
 
-    const assistantMsgId = getNextId('asst_msg')
+    const assistantMsgId = createClientId('assistant_msg')
     const assistantTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const isStreamEnabled = pref('streaming', true)
 
@@ -632,6 +800,7 @@ export default function App() {
             text: data.text,
             followUps: data.followUps || [],
             timestamp: assistantTimestamp,
+            escalate: data.escalate === true,
           },
         ])
         setIsTyping(false)
@@ -651,6 +820,7 @@ export default function App() {
             text: '',
             followUps: [],
             timestamp: assistantTimestamp,
+            escalate: response.headers.get('X-UPang-Escalation') === 'true',
           },
         ])
         setIsTyping(false)
@@ -671,19 +841,15 @@ export default function App() {
       }
     } catch (err) {
       console.error('Chat error:', err)
-      const fallbackResponse = generateCampusResponse(trimmed, {
-        tone: pref('tone', 'helpful'),
-        language: pref('language', 'en'),
-        tagalogMix: pref('tagalogMix', false),
-      })
       setMessages((prev) => {
         const exists = prev.some((m) => m.id === assistantMsgId)
         const fallbackMsg = {
           id: assistantMsgId,
           sender: 'assistant',
-          text: fallbackResponse.text,
-          followUps: fallbackResponse.followUps,
+          text: 'I’m sorry, but I couldn’t retrieve a reliable answer just now. Would you like to connect with our support team for further assistance?',
+          followUps: [],
           timestamp: assistantTimestamp,
+          escalate: true,
         }
         return exists
           ? prev.map((m) => (m.id === assistantMsgId ? fallbackMsg : m))
@@ -696,6 +862,148 @@ export default function App() {
         setShowThoughtLine(false)
         thoughtHideTimerRef.current = null
       }, 900)
+    }
+  }
+
+  const submitSupportRequest = async (question, history) => {
+    if (!authToken || isGuest) {
+      showToast({
+        type: 'warning',
+        title: 'Sign in to contact support',
+        message: 'Create an account or sign in before submitting a private support inquiry.',
+      })
+      return
+    }
+    setSupportBusy(true)
+    try {
+      const response = await fetch(`${apiBaseUrl}/support`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          question,
+          history: history.slice(-40),
+          requestId: createClientId('support_request'),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Your support request could not be submitted.')
+      setSupportConversation(data.conversation)
+      showToast({
+        type: data.administratorAvailable ? 'success' : 'warning',
+        title: data.administratorAvailable ? 'Inquiry submitted' : 'Support is currently unavailable',
+        message: data.message,
+      })
+    } catch (error) {
+      console.error('Live support request failed:', error)
+      showToast({ type: 'warning', title: 'Inquiry not submitted', message: error.message })
+    } finally {
+      setSupportBusy(false)
+    }
+  }
+
+  const handleConnectToSupport = () => {
+    const question = [...messages].reverse().find((message) => message.sender === 'user')?.text
+    if (!question) {
+      showToast({ type: 'warning', title: 'Question unavailable', message: 'Send your question again before contacting support.' })
+      return
+    }
+    const history = messages
+      .filter((message) => ['user', 'assistant'].includes(message.sender))
+      .map(({ id, sender, text }) => ({ id: String(id), sender, text }))
+    void submitSupportRequest(question, history)
+  }
+
+  const handleReturnToAI = () => {
+    setSupportPanelOpen(false)
+    supportPanelOpenRef.current = false
+  }
+
+  const handleReopenSupport = () => {
+    if (!supportConversation) return
+    const history = supportConversation.messages.map((message) => ({
+      id: message.clientMessageId,
+      sender: message.sender === 'student' ? 'user' : message.sender === 'assistant' ? 'assistant' : null,
+      text: message.text,
+    })).filter((message) => message.sender)
+    setSupportPanelOpen(true)
+    supportPanelOpenRef.current = true
+    setSupportUnreadCount(0)
+    void submitSupportRequest(supportConversation.question, history)
+  }
+
+  const handleSupportPanelToggle = () => {
+    const nextOpen = !supportPanelOpen
+    setSupportPanelOpen(nextOpen)
+    supportPanelOpenRef.current = nextOpen
+    if (nextOpen) setSupportUnreadCount(0)
+  }
+
+  const handleSupportMessageSubmit = async (event) => {
+    event.preventDefault()
+    const text = supportDraft.trim()
+    if (!text || !supportConversation || supportConversation.status === 'resolved') return
+
+    const clientMessageId = createClientId('support_msg')
+    const pendingMessage = {
+      sender: 'student',
+      senderId: null,
+      senderName: userName,
+      text,
+      clientMessageId,
+      createdAt: new Date().toISOString(),
+      pending: true,
+    }
+    setSupportConversation((current) => current
+      ? { ...current, messages: [...current.messages, pendingMessage] }
+      : current)
+    setSupportDraft('')
+    try {
+      const response = await fetch(`${apiBaseUrl}/support/${supportConversation._id}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `******`,
+        },
+        body: JSON.stringify({ text, clientMessageId }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Your message could not be sent.')
+      setSupportConversation(data.conversation)
+    } catch (error) {
+      console.error('Live support message failed:', error)
+      showToast({
+        type: 'warning',
+        title: 'Message waiting to send',
+        message: 'Your message is saved here and will be retried when the connection returns.',
+      })
+    }
+  }
+
+  const handleEndSupport = async () => {
+    if (!supportConversation || endingSupport) return
+    setEndingSupport(true)
+    try {
+      const response = await fetch(`${apiBaseUrl}/support/${supportConversation._id}/end`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `******`,
+        },
+        body: JSON.stringify({}),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'The conversation could not be ended.')
+      setSupportConversation(data.conversation)
+      setConfirmEndSupport(false)
+      showToast({ type: 'success', title: 'Conversation ended', message: 'You can keep chatting with the AI or reopen Live Support later.' })
+    } catch (error) {
+      console.error('Ending live support failed:', error)
+      showToast({ type: 'warning', title: 'Could not end conversation', message: error.message })
+    } finally {
+      setEndingSupport(false)
     }
   }
 
@@ -901,20 +1209,23 @@ export default function App() {
     return <HomeLoadingScreen />
   }
 
+  if (authRestoring) {
+    return <HomeLoadingScreen />
+  }
+
   if (view === 'login' || view === 'signup') {
     return (
       <div className={`auth-transition-page theme-${effectiveTheme}${authTransitionPhase ? ` auth-transition-page--${authTransitionPhase}` : ''}`}>
         {view === 'login' ? (
           <LoginPage
             onGuest={() => enterHome('Guest', 'Guest')}
-            onGoogle={() => enterHome('Google User', 'Student')}
             onSignUp={() => navigateAuthPage('signup')}
-            onEnterHome={enterHome}
+            onAuthenticated={completeSignIn}
           />
         ) : (
           <SignupPage
             onBack={() => navigateAuthPage('login')}
-            onEnterHome={enterHome}
+            onAuthenticated={completeSignIn}
           />
         )}
       </div>
@@ -1747,17 +2058,18 @@ export default function App() {
                 {messages.map((msg) => (
                   <div
                     key={msg.id}
-                    className={`msg ${msg.sender === 'user' ? 'me message-user' : 'bot message-assistant'}`}
+                    className={`msg ${msg.sender === 'user' ? 'me message-user' : msg.sender === 'system' ? 'support-system-message' : `bot message-assistant${msg.sender === 'admin' ? ' admin-reply' : ''}`}`}
                   >
-                    {msg.sender === 'assistant' && (
+                    {['assistant', 'admin'].includes(msg.sender) && (
                       <div className="av message-avatar" aria-hidden="true">
                         <img src={upangLogo} alt="UPang" className="avatar-torch" />
                       </div>
                     )}
 
                     <div className="bub message-bubble">
-                      {msg.sender === 'assistant' ? (
+                      {['assistant', 'admin'].includes(msg.sender) ? (
                         <>
+                          {msg.sender === 'admin' && <strong className="support-admin-name">{msg.senderName || 'Support administrator'}</strong>}
                           <div
                             className="formatted-content"
                             dangerouslySetInnerHTML={{
@@ -1765,16 +2077,35 @@ export default function App() {
                             }}
                           />
 
+                          {msg.sender === 'assistant' && msg.escalate && (
+                            <div className="support-escalation-actions">
+                              <button type="button" onClick={handleConnectToSupport} disabled={supportBusy}>
+                                {supportBusy ? 'Connecting…' : 'Connect with Live Chat'}
+                              </button>
+                              <button
+                                type="button"
+                                className="support-continue-button"
+                                onClick={() => setMessages((current) => current.map((item) => (
+                                  item.id === msg.id ? { ...item, escalate: false } : item
+                                )))}
+                              >
+                                Continue Chatting
+                              </button>
+                            </div>
+                          )}
+
                           {/* Campus Widget (Map, Installment Splitter, or Checklist) */}
-                          {renderAssistantWidget(msg)}
+                          {msg.sender === 'assistant' && renderAssistantWidget(msg)}
 
                           {/* Department Verification Badge */}
-                          <div className="src">
-                            ✓ Verified by <b>{getDepartmentForQuery(msg.text)}</b> <span>· Updated today</span>
-                          </div>
+                          {msg.sender === 'assistant' && !msg.escalate && (
+                            <div className="src">
+                              ✓ Verified by <b>{getDepartmentForQuery(msg.text)}</b> <span>· Updated today</span>
+                            </div>
+                          )}
 
                           {/* Quick Action Suggestion Chips */}
-                          {pref('quickActions', true) && msg.followUps && msg.followUps.length > 0 && (
+                          {msg.sender === 'assistant' && pref('quickActions', true) && msg.followUps && msg.followUps.length > 0 && (
                             <div className="fu followup-chips">
                               {msg.followUps.map((chip) => (
                                 <button
@@ -1791,7 +2122,7 @@ export default function App() {
                           )}
 
                           {/* Was this helpful feedback */}
-                          <div className="fb">
+                          {msg.sender === 'assistant' && !msg.escalate && <div className="fb">
                             {feedbackMap[msg.id] ? (
                               <span>
                                 {feedbackMap[msg.id] === 'yes' ? '💚 Thank you for your feedback!' : "👍 Thanks, we'll improve our answers."}
@@ -1803,10 +2134,15 @@ export default function App() {
                                 <button type="button" onClick={() => handleFeedback(msg.id, 'no')}>No</button>
                               </>
                             )}
-                          </div>
+                          </div>}
                         </>
-                      ) : (
+                      ) : msg.sender === 'system' ? (
                         <p>{msg.text}</p>
+                      ) : (
+                        <>
+                          <p>{msg.text}</p>
+                          {msg.pending && <small className="support-pending-message">Queued for delivery when the connection returns.</small>}
+                        </>
                       )}
                     </div>
                   </div>
@@ -1868,6 +2204,7 @@ export default function App() {
             <input
               ref={inputRef}
               type="text"
+              maxLength={2000}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ask anything about UPang (grades, admissions, buildings, fees)..."
@@ -1901,6 +2238,119 @@ export default function App() {
           </p>
         </div>
       </main>
+
+      {supportConversation && (
+        <aside className="support-widget" aria-label="Live support">
+          {supportPanelOpen && (
+            <section className="support-widget-panel" role="dialog" aria-label="Live support conversation">
+              <header className="support-widget-header">
+                <div>
+                  <strong>Live Support</strong>
+                  <span className={`support-widget-status support-widget-status-${supportConversation.status}`}>
+                    {supportConversation.status === 'waiting_for_support' && 'Waiting for Support'}
+                    {supportConversation.status === 'assigned' && 'Assigned'}
+                    {supportConversation.status === 'live_chat' && 'Live Chat'}
+                    {supportConversation.status === 'resolved' && 'Resolved'}
+                    {supportConversation.status === 'ended_by_student' && 'Ended by you'}
+                  </span>
+                </div>
+                <button type="button" onClick={handleReturnToAI} aria-label="Close live support">×</button>
+              </header>
+
+              <div className="support-widget-transcript" aria-live="polite">
+                {supportConversation.status === 'waiting_for_support' && (
+                  <p className="support-widget-notice">Your inquiry is saved. An administrator will reply here when available.</p>
+                )}
+                {supportConversation.status === 'assigned' && (
+                  <p className="support-widget-notice">An administrator accepted your inquiry and will reply here.</p>
+                )}
+                {supportConversation.status === 'resolved' && (
+                  <p className="support-widget-notice">This inquiry has been answered and resolved. You can return to AI Chat or reopen Live Chat.</p>
+                )}
+                {supportConversation.status === 'ended_by_student' && (
+                  <p className="support-widget-notice">You ended this conversation. You can return to AI Chat or reopen Live Support.</p>
+                )}
+                {supportConversation.messages.map((message) => {
+                  const mapped = mapSupportMessage(message)
+                  return (
+                    <div key={message.clientMessageId || message._id} className={`support-widget-message support-widget-message-${mapped.sender}`}>
+                      {mapped.sender === 'admin' && <strong>{mapped.senderName || 'Support administrator'}</strong>}
+                      <p>{mapped.text}</p>
+                      {message.pending && <small>Waiting for connection…</small>}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {['resolved', 'ended_by_student'].includes(supportConversation.status) ? (
+                <div className="support-widget-actions">
+                  <button type="button" onClick={handleReturnToAI}>Return to AI Chat</button>
+                  <button type="button" onClick={handleReopenSupport} disabled={supportBusy}>
+                    {supportBusy ? 'Reopening…' : 'Reopen Live Chat'}
+                  </button>
+                </div>
+              ) : (
+                <form className="support-widget-composer" onSubmit={handleSupportMessageSubmit}>
+                  <input
+                    value={supportDraft}
+                    maxLength={2000}
+                    onChange={(event) => setSupportDraft(event.target.value)}
+                    placeholder="Message the support team…"
+                    aria-label="Message live support"
+                  />
+                  <button type="submit" disabled={!supportDraft.trim()} aria-label="Send support message">Send</button>
+                </form>
+              )}
+              {!['resolved', 'ended_by_student'].includes(supportConversation.status) && (
+                <div className="support-widget-end-actions">
+                  {confirmEndSupport ? (
+                    <>
+                      <span>End this support conversation?</span>
+                      <button type="button" className="support-widget-end-confirm" onClick={() => void handleEndSupport()} disabled={endingSupport}>
+                        {endingSupport ? 'Ending…' : 'Yes, end'}
+                      </button>
+                      <button type="button" className="support-widget-end-cancel" onClick={() => setConfirmEndSupport(false)} disabled={endingSupport}>
+                        Keep chatting
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="support-widget-end-trigger" onClick={() => setConfirmEndSupport(true)}>
+                      End conversation
+                    </button>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+          <button
+            type="button"
+            className="support-widget-bubble"
+            onClick={handleSupportPanelToggle}
+            aria-expanded={supportPanelOpen}
+            aria-label={`${supportPanelOpen ? 'Close' : 'Open'} Live Support${supportUnreadCount
+              ? `, ${supportUnreadCount} new ${supportUnreadCount === 1 ? 'reply' : 'replies'}`
+              : `: ${supportConversation.status === 'waiting_for_support'
+                ? 'Waiting for an administrator'
+                : supportConversation.status === 'assigned'
+                  ? 'Administrator assigned'
+                  : supportConversation.status === 'live_chat'
+                    ? 'View your support chat'
+                    : supportConversation.status === 'ended_by_student'
+                      ? 'Ended by you'
+                      : 'View answered inquiry'}`}`}
+          >
+            <svg className="support-widget-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 7.9 7.9 0 0 1-3.3-.72L4 20l1.72-4.48A7.9 7.9 0 0 1 5 12a7.5 7.5 0 1 1 15 0v-.5Z" />
+              <path d="M8.5 12h.01M12 12h.01M15.5 12h.01" />
+            </svg>
+            {supportUnreadCount > 0 && (
+              <span className="support-widget-unread" aria-hidden="true">
+                {supportUnreadCount > 9 ? '9+' : supportUnreadCount}
+              </span>
+            )}
+          </button>
+        </aside>
+      )}
 
       {/* Floating Toast Notification Stack */}
       <div className="toast-container" aria-live="polite">
@@ -1984,15 +2434,21 @@ function formatMarkdown(text) {
   return result.join('')
 }
 
-function GoogleIcon() {
-  return (
-    <svg className="social-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.3-1.6 3.8-5.4 3.8-3.2 0-5.8-2.7-5.8-6s2.6-6 5.8-6c1.8 0 3 .8 3.7 1.5l2.5-2.4C16.7 3.1 14.6 2.2 12 2.2 6.9 2.2 2.8 6.3 2.8 11.4s4.1 9.2 9.2 9.2c5.3 0 8.8-3.7 8.8-8.9 0-.6-.1-1.1-.2-1.5H12Z"/>
-      <path fill="#4285F4" d="M3.7 7.1l3.5 2.6c1-1.9 3.1-3.1 5.8-3.1 1.8 0 3 .8 3.7 1.5l2.5-2.4C16.7 3.1 14.6 2.2 12 2.2c-3.7 0-6.9 2.1-8.3 5.1Z"/>
-      <path fill="#FBBC05" d="M3.8 15.6A9.3 9.3 0 0 1 3.3 11c0-.9.2-1.8.5-2.6L.9 6.1A11.2 11.2 0 0 0 0 11c0 1.8.4 3.5 1.2 5l2.6-1.4Z"/>
-      <path fill="#34A853" d="M12 21.7c2.5 0 4.5-.8 6-2.2l-2.9-2.4c-.8.5-1.9.9-3.1.9-2.7 0-4.9-1.9-5.4-4.3l-3 2.3A9.2 9.2 0 0 0 12 21.7Z"/>
-    </svg>
-  )
+function createClientId(prefix) {
+  return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+}
+
+function mapSupportMessage(message) {
+  const sender = message.sender === 'student' ? 'user' : message.sender
+  return {
+    id: message.clientMessageId || String(message._id),
+    sender,
+    senderName: message.senderName,
+    text: message.text,
+    timestamp: message.createdAt
+      ? new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '',
+  }
 }
 
 const LEGAL_POLICIES = {
@@ -2204,16 +2660,120 @@ function LegalDocumentModal({ type, onClose, onReachEnd, onConfirm, hasReachedEn
   )
 }
 
-function LoginPage({ onGuest, onGoogle, onSignUp, onEnterHome }) {
+function GoogleMark() {
+  return (
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 48 48">
+      <path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.1h6.6c3.9-3.6 6.1-8.8 6.1-15Z" />
+      <path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.9l-6.6-5.1c-1.8 1.2-4.1 2-6.9 2-5.3 0-9.8-3.6-11.4-8.4H5.8v5.2A20 20 0 0 0 24 44Z" />
+      <path fill="#FBBC05" d="M12.6 27.6a12 12 0 0 1 0-7.2v-5.2H5.8a20 20 0 0 0 0 17.6l6.8-5.2Z" />
+      <path fill="#EA4335" d="M24 12c3 0 5.7 1 7.8 3.1l5.8-5.8C34.1 6 29.5 4 24 4A20 20 0 0 0 5.8 15.2l6.8 5.2C14.2 15.6 18.7 12 24 12Z" />
+    </svg>
+  )
+}
+
+function LoginPage({ onGuest, onSignUp, onAuthenticated }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const handleSubmit = (event) => {
+  const [authError, setAuthError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const googleButtonRef = useRef(null)
+  const onAuthenticatedRef = useRef(onAuthenticated)
+
+  useEffect(() => {
+    onAuthenticatedRef.current = onAuthenticated
+  }, [onAuthenticated])
+
+  useEffect(() => {
+    if (!googleClientId) return undefined
+    let cancelled = false
+    let script = document.getElementById('google-identity-services')
+    const handleScriptError = () => {
+      if (!cancelled) setAuthError('Google sign-in could not load. Check your internet connection and try again.')
+    }
+    const initializeGoogleButton = () => {
+      const identity = window.google?.accounts?.id
+      if (cancelled || !identity || !googleButtonRef.current) return
+      googleButtonRef.current.replaceChildren()
+      identity.initialize({
+        client_id: googleClientId,
+        callback: async (response = {}) => {
+          const { credential } = response
+          if (!credential) {
+            setAuthError('Google sign-in did not return a credential. Please try again.')
+            return
+          }
+          setAuthError('')
+          setIsSubmitting(true)
+          try {
+            const response = await fetch(`${apiBaseUrl}/auth/google`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ credential }),
+            })
+            const data = await parseAuthResponse(response, 'Google sign-in failed.')
+            onAuthenticatedRef.current(data)
+          } catch (error) {
+            console.error('Google sign-in failed:', error)
+            setAuthError(getAuthErrorMessage(error, 'Google sign-in failed. Please try again.'))
+          } finally {
+            setIsSubmitting(false)
+          }
+        },
+      })
+      identity.renderButton(googleButtonRef.current, {
+        theme: 'outline',
+        size: 'large',
+        shape: 'rectangular',
+        text: 'continue_with',
+        width: 200,
+        logo_alignment: 'left',
+      })
+    }
+
+    if (!script) {
+      script = document.createElement('script')
+      script.id = 'google-identity-services'
+      script.src = 'https://accounts.google.com/gsi/client'
+      script.async = true
+      script.defer = true
+      script.addEventListener('load', initializeGoogleButton)
+      script.addEventListener('error', handleScriptError)
+      document.head.appendChild(script)
+    } else {
+      script.addEventListener('load', initializeGoogleButton)
+      script.addEventListener('error', handleScriptError)
+      initializeGoogleButton()
+    }
+    return () => {
+      cancelled = true
+      script?.removeEventListener('load', initializeGoogleButton)
+      script?.removeEventListener('error', handleScriptError)
+    }
+  }, [])
+
+  const handleGoogleButtonFallback = () => {
+    setAuthError('Google sign-in is not configured. Set VITE_GOOGLE_CLIENT_ID in the student app and GOOGLE_CLIENT_ID in the API.')
+  }
+
+  const handleSubmit = async (event) => {
     event.preventDefault()
-    const displayName = email.split('@')[0]
-      .replace(/[._-]+/g, ' ')
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-    onEnterHome(displayName || 'Student', 'Student')
+    setAuthError('')
+    setIsSubmitting(true)
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      const data = await parseAuthResponse(response, 'Sign-in failed.')
+      onAuthenticated(data)
+    } catch (error) {
+      console.error('Sign-in failed:', error)
+      setAuthError(getAuthErrorMessage(error, 'Sign-in failed. Please try again.'))
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -2291,7 +2851,6 @@ function LoginPage({ onGuest, onGoogle, onSignUp, onEnterHome }) {
             <div className="auth-field-group">
               <div className="auth-field-label-row">
                 <label htmlFor="password" className="auth-field-label">Password</label>
-                <button type="button" className="auth-forgot-link">Forgot password?</button>
               </div>
               <div className="auth-input-container">
                 <svg className="auth-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -2333,9 +2892,10 @@ function LoginPage({ onGuest, onGoogle, onSignUp, onEnterHome }) {
               <span>Remember this device</span>
             </label>
 
-            <button className="auth-submit-gradient-btn" type="submit">
-              Log In →
+            <button className="auth-submit-gradient-btn" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Signing in…' : 'Log In →'}
             </button>
+            {authError && <p className="auth-legal-error" role="alert">{authError}</p>}
           </form>
 
           <div className="auth-or-divider">
@@ -2343,14 +2903,20 @@ function LoginPage({ onGuest, onGoogle, onSignUp, onEnterHome }) {
           </div>
 
           <div className="auth-social-grid">
-            <button
-              type="button"
-              className="auth-social-card"
-              onClick={() => onGoogle ? onGoogle() : onEnterHome('Google User', 'Student')}
-            >
-              <GoogleIcon />
-              <span>Google Account</span>
-            </button>
+            {googleClientId ? (
+              <div className="auth-google-button-slot" ref={googleButtonRef} aria-label="Continue with Google">
+                {!window.google?.accounts?.id && <span className="auth-google-loading">Loading Google sign-in…</span>}
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="auth-social-card auth-google-fallback"
+                onClick={handleGoogleButtonFallback}
+              >
+                <GoogleMark />
+                <span>Continue with Google</span>
+              </button>
+            )}
             <button
               type="button"
               className="auth-social-card"
@@ -2373,7 +2939,7 @@ function LoginPage({ onGuest, onGoogle, onSignUp, onEnterHome }) {
   )
 }
 
-function SignupPage({ onBack, onEnterHome }) {
+function SignupPage({ onBack, onAuthenticated }) {
   const [form, setForm] = useState({
     fullName: '',
     course: '',
@@ -2389,6 +2955,7 @@ function SignupPage({ onBack, onEnterHome }) {
   })
   const [activeLegalDoc, setActiveLegalDoc] = useState(null)
   const [legalFormError, setLegalFormError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCourseDropdownOpen, setIsCourseDropdownOpen] = useState(false)
   const courseDropdownRef = useRef(null)
   const courseNativeSelectRef = useRef(null)
@@ -2471,13 +3038,42 @@ function SignupPage({ onBack, onEnterHome }) {
     setLegalFormError('')
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
     if (!isLegalDocumentAccepted('terms') || !isLegalDocumentAccepted('privacy')) {
       setLegalFormError('Read both documents to the end and check both agreement boxes before creating your account.')
       return
     }
-    onEnterHome(form.fullName.trim() || 'Student', 'Student', form.course)
+    if (form.password !== form.confirmPassword) {
+      setLegalFormError('Passwords do not match.')
+      return
+    }
+    if (form.password.length < 12) {
+      setLegalFormError('Use a password with at least 12 characters.')
+      return
+    }
+    setLegalFormError('')
+    setIsSubmitting(true)
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.fullName,
+          email: form.email,
+          password: form.password,
+          course: form.course,
+          accountType: 'student',
+        }),
+      })
+      const data = await parseAuthResponse(response, 'Account creation failed.')
+      onAuthenticated(data)
+    } catch (error) {
+      console.error('Account creation failed:', error)
+      setLegalFormError(getAuthErrorMessage(error, 'Account creation failed. Please try again.'))
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -2806,8 +3402,8 @@ function SignupPage({ onBack, onEnterHome }) {
 
             {legalFormError && <p className="auth-legal-error" role="alert">{legalFormError}</p>}
 
-            <button className="auth-submit-gradient-btn" type="submit">
-              Create Account →
+            <button className="auth-submit-gradient-btn" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Creating account…' : 'Create Account →'}
             </button>
           </form>
 

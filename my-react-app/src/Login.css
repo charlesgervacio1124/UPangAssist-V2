@@ -479,6 +479,18 @@
   text-decoration: none;
 }
 
+.auth-legal-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.auth-submit-gradient-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .auth-forgot-link:hover {
   text-decoration: underline;
 }
@@ -837,6 +849,24 @@
   border-color: #d1d5db;
   background: #f9fafb;
   transform: translateY(-1px);
+}
+
+.auth-google-button-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 44px;
+  overflow: hidden;
+}
+
+.auth-google-button-slot iframe {
+  max-width: 100%;
+}
+
+.auth-google-loading {
+  color: #6b7280;
+  font-size: 12px;
 }
 
 .auth-guest-icon {

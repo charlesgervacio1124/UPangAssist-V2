@@ -24,7 +24,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenAddKnowledge,
 }) => {
 
-  const escalations = inquiries.filter((inquiry) => inquiry.status === 'Escalated').length
+  const escalations = inquiries.filter((inquiry) => (
+    inquiry.status === 'Waiting for Support' || inquiry.status === 'Assigned'
+  )).length
   const categoryCounts = [...new Set(inquiries.map((inquiry) => inquiry.category))].map((category) => ({
     name: category,
     count: inquiries.filter((inquiry) => inquiry.category === category).length,
@@ -101,7 +103,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="mt-3 flex items-baseline gap-2">
             <span className="text-2xl font-black text-white">{escalations}</span>
           </div>
-          <p className="mt-1 text-[11px] text-white/40">Escalated inquiries</p>
+          <p className="mt-1 text-[11px] text-white/40">Waiting or assigned support</p>
         </div>
 
         {/* Card 4 */}
@@ -245,7 +247,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                           inq.status === 'Resolved'
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                            : inq.status === 'Escalated'
+                            : inq.status === 'Waiting for Support' || inq.status === 'Assigned'
                             ? 'bg-[#df9e28]/20 text-[#f0b445] border border-[#df9e28]/40'
                             : 'bg-white/10 text-white/70'
                         }`}

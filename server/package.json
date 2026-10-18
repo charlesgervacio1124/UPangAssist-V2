@@ -1,11 +1,14 @@
 {
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
-    "mongoose": "^9.9.5"
+    "google-auth-library": "^11.3.1",
+    "mongoose": "^9.9.5",
+    "socket.io": "^4.8.4"
   }
 }
