@@ -62,7 +62,7 @@ export const InquiriesView: React.FC<InquiriesViewProps> = ({
   const isAssignedToAnother = Boolean(selected?.assignedTo && selected.assignedTo !== adminId)
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-xl font-black tracking-tight text-white">Live Support Conversations</h1>
@@ -74,7 +74,7 @@ export const InquiriesView: React.FC<InquiriesViewProps> = ({
       </div>
 
       <div className="glass-panel flex flex-col items-stretch justify-between gap-3 rounded-2xl p-3 md:flex-row md:items-center">
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
           <input
             type="text"
@@ -99,7 +99,7 @@ export const InquiriesView: React.FC<InquiriesViewProps> = ({
 
       <div className="glass-panel overflow-hidden rounded-3xl">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[720px] text-left text-xs">
             <thead className="border-b border-white/10 text-[10px] font-bold uppercase tracking-wider text-white/50">
               <tr>
                 <th className="px-4 py-3.5">Student</th>
@@ -152,14 +152,14 @@ export const InquiriesView: React.FC<InquiriesViewProps> = ({
       </div>
 
       {selected && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 sm:p-4 backdrop-blur-md">
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="support-dialog-title"
-            className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-[#df9e28]/40 bg-[#0c2217] shadow-2xl"
+            className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-[#df9e28]/40 bg-[#0c2217] shadow-2xl sm:max-h-[calc(100dvh-2rem)]"
           >
-            <header className="flex items-center justify-between border-b border-white/10 p-5">
+            <header className="flex items-center justify-between gap-3 border-b border-white/10 p-3 sm:p-5">
               <div className="min-w-0">
                 <h2 id="support-dialog-title" className="text-sm font-extrabold text-white">Support conversation</h2>
                 <p className="mt-1 truncate text-xs text-white/50">{selected.studentName} · {selected.studentId}</p>
@@ -174,33 +174,65 @@ export const InquiriesView: React.FC<InquiriesViewProps> = ({
               </button>
             </header>
 
-            <div className="flex-1 space-y-3 overflow-y-auto p-5">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 sm:p-5">
               <div className="rounded-2xl border border-[#df9e28]/35 bg-[#df9e28]/15 p-3.5">
                 <span className="mb-1 block text-[10px] font-bold uppercase text-[#f0b445]">Original question</span>
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-white">{selected.query}</p>
               </div>
-              {selected.messages.map((message) => (
-                <div
-                  key={message.clientMessageId || message._id}
-                  className={`max-w-[88%] rounded-2xl border p-3 text-sm leading-relaxed ${
-                    message.sender === 'admin'
-                      ? 'ml-auto border-emerald-400/20 bg-emerald-400/10 text-white'
-                      : message.sender === 'student'
-                        ? 'border-white/10 bg-white/[0.05] text-white'
-                        : 'border-white/5 bg-black/20 text-white/70'
-                  }`}
-                >
-                  <span className="mb-1 block text-[10px] font-bold text-[#f0b445]">
-                    {message.senderName || (message.sender === 'assistant' ? 'UPangAssist' : 'Support')}
-                  </span>
-                  <p className="whitespace-pre-wrap">{message.text}</p>
-                </div>
-              ))}
+              {selected.messages.map((message) => {
+                const isAdmin = message.sender === 'admin'
+                const isStudent = message.sender === 'student'
+                const timeString = message.createdAt
+                  ? (() => {
+                      try {
+                        const d = new Date(message.createdAt)
+                        return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      } catch {
+                        return ''
+                      }
+                    })()
+                  : ''
+
+                return (
+                  <div
+                    key={message.clientMessageId || message._id}
+                    className={`flex flex-col ${isAdmin ? 'items-end' : 'items-start'}`}
+                  >
+                    <div
+                      className={`max-w-[85%] rounded-2xl p-3.5 text-sm leading-relaxed shadow-sm transition-all ${
+                        isAdmin
+                          ? 'rounded-tr-xs border border-emerald-400/30 bg-emerald-500/20 text-emerald-50'
+                          : isStudent
+                            ? 'rounded-tl-xs border border-white/15 bg-white/10 text-white'
+                            : 'rounded-tl-xs border border-amber-400/25 bg-amber-400/10 text-amber-100'
+                      }`}
+                    >
+                      <div className="mb-1 flex items-center gap-2">
+                        <span
+                          className={`text-[10px] font-bold uppercase tracking-wider ${
+                            isAdmin ? 'text-emerald-300' : 'text-[#f0b445]'
+                          }`}
+                        >
+                          {isAdmin
+                            ? 'Support Admin (You)'
+                            : message.senderName || (message.sender === 'assistant' ? 'UPangAssist Bot' : 'Student')}
+                        </span>
+                        {timeString && (
+                          <span className="text-[10px] text-white/40">
+                            {timeString}
+                          </span>
+                        )}
+                      </div>
+                      <p className="whitespace-pre-wrap">{message.text}</p>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
 
             {actionError && <p role="alert" className="mx-5 rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-200">{actionError}</p>}
 
-            <footer className="space-y-3 border-t border-white/10 p-5">
+            <footer className="space-y-3 border-t border-white/10 p-3 sm:p-5">
               {!['Resolved', 'Ended by Student'].includes(selected.status) && !isAssignedToAnother && (
                 <>
                   {selected.status === 'Waiting for Support' && (

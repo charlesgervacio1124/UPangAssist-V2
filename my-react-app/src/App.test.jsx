@@ -107,6 +107,7 @@ afterEach(() => {
 })
 
 async function signInAsStudent() {
+  openLogin()
   fireEvent.change(screen.getByLabelText('Student Email Address'), {
     target: { value: studentSession.user.email },
   })
@@ -125,10 +126,14 @@ async function signInAsStudent() {
 }
 
 function openSignup() {
-  fireEvent.click(screen.getAllByRole('button', { name: /^sign up$/i })[0])
-  act(() => {
-    vi.advanceTimersByTime(180)
-  })
+  fireEvent.click(screen.getByRole('button', { name: /^sign up$/i }))
+  act(() => vi.advanceTimersByTime(180))
+}
+
+function openLogin() {
+  openSignup()
+  fireEvent.click(screen.getAllByRole('button', { name: /^log in$/i })[0])
+  act(() => vi.advanceTimersByTime(180))
 }
 
 function scrollLegalDocumentToEnd(label) {
@@ -142,15 +147,18 @@ function scrollLegalDocumentToEnd(label) {
 }
 
 describe('authentication flow', () => {
-  it('shows the login page on first load', () => {
+  it('opens the guest assistant home by default', () => {
     render(<App />)
 
-    expect(screen.getByText(/Welcome Back to/i)).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /sign up/i }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { name: /Guest!/ })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Ask a question' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^sign up$/i })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Student Email Address')).not.toBeInTheDocument()
   })
 
   it('offers Google sign-in and explains when OAuth is not configured', () => {
     render(<App />)
+    openLogin()
 
     fireEvent.click(screen.getByRole('button', { name: /continue with google/i }))
 
@@ -159,6 +167,7 @@ describe('authentication flow', () => {
 
   it('shows backend startup guidance when the login API returns an empty response', async () => {
     render(<App />)
+    openLogin()
     fetch.mockResolvedValueOnce({
       ok: false,
       status: 502,
@@ -182,6 +191,7 @@ describe('authentication flow', () => {
 
   it('transitions between login and signup without showing the home loading screen', () => {
     render(<App />)
+    openLogin()
 
     fireEvent.click(screen.getAllByRole('button', { name: /^sign up$/i })[0])
     expect(document.querySelector('.auth-transition-page--exiting')).toBeInTheDocument()
@@ -297,12 +307,8 @@ describe('sidebar actions', () => {
   it('shows the guest sidebar without history and offers sign up there', () => {
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /continue as guest/i }))
-    act(() => {
-      vi.advanceTimersByTime(1200)
-    })
-
     expect(document.querySelector('.app-shell.home-entry')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Guest!/ })).toBeInTheDocument()
     expect(screen.getByRole('complementary')).toBeInTheDocument()
     expect(screen.queryByPlaceholderText('Search History')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /open sidebar menu/i })).toBeInTheDocument()
@@ -322,13 +328,27 @@ describe('sidebar actions', () => {
     expect(courseSelect).toHaveValue('Bachelor of Science in Information Technology')
   })
 
+  it('does not offer live chat to guests when an answer is inconclusive', async () => {
+    render(<App />)
+
+    const ask = screen.getByRole('textbox', { name: 'Ask a question' })
+    fireEvent.change(ask, { target: { value: 'What is an unfamiliar campus procedure?' } })
+    await act(async () => {
+      fireEvent.submit(ask.closest('form'))
+      for (let index = 0; index < 6; index += 1) await Promise.resolve()
+    })
+
+    expect(screen.getByText('I could not find a reliable answer. Would you like to contact support?')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Connect with Live Chat' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue Chatting' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Live support' })).not.toBeInTheDocument()
+    expect(screen.getByText('Was this helpful?')).toBeInTheDocument()
+    expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/support'))).toBe(false)
+  })
+
   it('does not show Profile settings to guests', () => {
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /continue as guest/i }))
-    act(() => {
-      vi.advanceTimersByTime(1200)
-    })
     fireEvent.click(screen.getByRole('button', { name: /settings/i }))
 
     expect(screen.queryByRole('button', { name: 'Profile' })).not.toBeInTheDocument()
@@ -390,6 +410,7 @@ describe('chatbot escalation to live support', () => {
   it('offers the live support option when a streamed answer is marked inconclusive', async () => {
     render(<App />)
     await signInAsStudent()
+    expect(screen.getByRole('heading', { name: /Juan!/ })).toBeInTheDocument()
     const fallbackText = 'I could not find a reliable answer. Would you like to contact support?'
     fetch.mockImplementationOnce(async () => ({
       ok: true,
@@ -465,12 +486,18 @@ describe('chatbot escalation to live support', () => {
     expect(supportRequests[0].history.some((message) => message.sender === 'assistant')).toBe(true)
     expect(screen.getByRole('button', { name: /Open Live Support: Waiting for an administrator/i })).toBeInTheDocument()
     expect(screen.getByText('Support is currently unavailable', { exact: true })).toBeInTheDocument()
+    expect(document.querySelector('.toast-duration-bar')).toHaveStyle({ animationDuration: '4200ms' })
 
     fireEvent.click(screen.getByRole('button', { name: /Open Live Support/i }))
     expect(screen.getByRole('dialog', { name: 'Live support conversation' })).toBeInTheDocument()
     expect(screen.getByText('Waiting for Support')).toBeInTheDocument()
     expect(screen.getAllByText('Can I speak with a person about my enrollment?').length).toBeGreaterThan(1)
     expect(screen.getByRole('textbox', { name: 'Ask a question' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /Open Live Support/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close live support' }))
+    expect(screen.queryByRole('dialog', { name: 'Live support conversation' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Open Live Support/i })).toBeInTheDocument()
   })
 
   it('keeps AI chat available while a support inquiry is waiting', async () => {
@@ -561,19 +588,44 @@ describe('chatbot escalation to live support', () => {
       expect.objectContaining({ method: 'POST' }),
     )
     expect(screen.getByText('You ended this conversation. You can return to AI Chat or reopen Live Support.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Close Live Support: Ended by you/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close live support' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Open Live Support/i })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Ask a question' })).toBeEnabled()
+  })
+})
+
+describe('campus advisory duration', () => {
+  it('shows a 10-second duration bar and automatically dismisses the advisory', () => {
+    render(<App />)
+
+    expect(screen.getByText('CAMPUS ADVISORY')).toBeInTheDocument()
+    expect(document.querySelector('.campus-alert-duration-bar')).toHaveStyle({
+      animationDuration: '10000ms',
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(9999)
+    })
+    expect(screen.getByText('CAMPUS ADVISORY')).toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(screen.queryByText('CAMPUS ADVISORY')).not.toBeInTheDocument()
+  })
+
+  it('dismisses the advisory immediately when closed manually', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss alert' }))
+
+    expect(screen.queryByText('CAMPUS ADVISORY')).not.toBeInTheDocument()
   })
 })
 
 describe('notification center', () => {
   it('marks notifications as read and clears them from the inbox', () => {
     render(<App />)
-
-    fireEvent.click(screen.getByRole('button', { name: /continue as guest/i }))
-    act(() => {
-      vi.advanceTimersByTime(1200)
-    })
 
     fireEvent.click(screen.getByRole('button', { name: /notifications/i }))
     expect(screen.getByText('Registrar Document Releasing')).toBeInTheDocument()
@@ -588,11 +640,6 @@ describe('notification center', () => {
   it('dismisses an individual notification', () => {
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /continue as guest/i }))
-    act(() => {
-      vi.advanceTimersByTime(1200)
-    })
-
     fireEvent.click(screen.getByRole('button', { name: /notifications/i }))
     const dismissBtns = screen.getAllByRole('button', { name: /dismiss notification/i })
     expect(dismissBtns.length).toBeGreaterThan(0)
@@ -603,10 +650,6 @@ describe('notification center', () => {
 
   it('navigates settings tabs and persists preferences', () => {
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /continue as guest/i }))
-    act(() => {
-      vi.advanceTimersByTime(1200)
-    })
 
     fireEvent.click(screen.getByRole('button', { name: /settings/i }))
     fireEvent.click(screen.getAllByRole('button', { name: /appearance/i })[0])

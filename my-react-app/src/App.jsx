@@ -7,6 +7,9 @@ import BorderGlow from './BorderGlow'
 import './App.css'
 import './Login.css'
 
+const CAMPUS_ALERT_DURATION_MS = 10000
+const welcomeGreetings = ['Welcome', 'Hello', 'Good to see you', 'Great to have you here']
+
 const quickPrompts = [
   "Where is the Registrar's Office?",
   'Where can I pay my tuition?',
@@ -286,11 +289,14 @@ function getNextId(prefix = 'item') {
 }
 
 export default function App() {
-  const [view, setView] = useState('login')
+  const [view, setView] = useState('assistant')
+  const [welcomeGreeting] = useState(
+    () => welcomeGreetings[Math.floor(Math.random() * welcomeGreetings.length)]
+  )
   const [authTransitionPhase, setAuthTransitionPhase] = useState(null)
   const [isLoadingHome, setIsLoadingHome] = useState(false)
-  const [userName, setUserName] = useState('')
-  const [userRole, setUserRole] = useState('')
+  const [userName, setUserName] = useState('Guest')
+  const [userRole, setUserRole] = useState('Guest')
   const [userCourse, setUserCourse] = useState('')
   const [userPhoto, setUserPhoto] = useState('')
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('upang_auth_token') || '')
@@ -468,12 +474,13 @@ export default function App() {
   const [toasts, setToasts] = useState([])
   const showToast = (toast) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`
-    const newToast = { id, ...toast }
+    const duration = 4200
+    const newToast = { id, ...toast, duration }
     setToasts((prev) => [...prev, newToast])
     if (pref('soundEffects', false)) playCompletionChime()
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id))
-    }, 4200)
+    }, duration)
   }
 
   // Close notifications popover on click outside
@@ -539,6 +546,13 @@ export default function App() {
     })
   }
   const pref = (key, defaultVal) => (key in prefs ? prefs[key] : defaultVal)
+  const campusAlertsEnabled = pref('campusAlerts', true)
+
+  useEffect(() => {
+    if (!campusAlertsEnabled || dismissedAlert) return undefined
+    const timeout = window.setTimeout(() => setDismissedAlert(true), CAMPUS_ALERT_DURATION_MS)
+    return () => window.clearTimeout(timeout)
+  }, [campusAlertsEnabled, dismissedAlert])
 
   // Dynamic theme resolution ('dark', 'light', 'system')
   const themeSetting = pref('theme', 'dark')
@@ -1390,12 +1404,18 @@ export default function App() {
             </span>
           </div>
           <button
-            className="user-login-pill-btn"
+            className={`user-login-pill-btn ${isGuest ? '' : 'user-logout-icon-btn'}`}
             type="button"
             onClick={isGuest ? () => navigateAuthPage('signup') : handleAccountAction}
             title={isGuest ? 'Sign up' : 'Log out'}
+            aria-label={isGuest ? 'Sign up' : 'Log out'}
           >
-            {isGuest ? 'Sign Up' : 'Log Out'}
+            {isGuest ? 'Sign Up' : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M10 17l5-5-5-5M15 12H3" />
+                <path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7" />
+              </svg>
+            )}
           </button>
         </div>
       </aside>
@@ -1972,7 +1992,7 @@ export default function App() {
         </header>
 
         {/* Campus Alert Banner */}
-        {pref('campusAlerts', true) && !dismissedAlert && (
+        {campusAlertsEnabled && !dismissedAlert && (
           <div className="campus-alert-banner">
             <div className="campus-alert-content">
               <span className="campus-alert-badge">CAMPUS ADVISORY</span>
@@ -1986,6 +2006,11 @@ export default function App() {
               onClick={() => setDismissedAlert(true)}
               aria-label="Dismiss alert"
             >✕</button>
+            <span
+              className="campus-alert-duration-bar"
+              style={{ animationDuration: `${CAMPUS_ALERT_DURATION_MS}ms` }}
+              aria-hidden="true"
+            />
           </div>
         )}
 
@@ -2003,7 +2028,7 @@ export default function App() {
 
               {/* Headline with exact font */}
               <h1 className="welcome-title-bold">
-                Welcome to <span className="gold-text">Upang Assist</span>
+                {welcomeGreeting}, <span className="gold-text">{userName.trim().split(/\s+/)[0] || (isGuest ? 'Guest' : 'there')}!</span>
               </h1>
               <p className="welcome-sub-prompt">What can I help you today?</p>
 
@@ -2069,7 +2094,12 @@ export default function App() {
                     <div className="bub message-bubble">
                       {['assistant', 'admin'].includes(msg.sender) ? (
                         <>
-                          {msg.sender === 'admin' && <strong className="support-admin-name">{msg.senderName || 'Support administrator'}</strong>}
+                          {msg.sender === 'admin' && (
+                            <div className="live-chat-admin-header">
+                              <span className="live-chat-badge">LIVE SUPPORT</span>
+                              <strong className="support-admin-name">{msg.senderName || 'Support administrator'}</strong>
+                            </div>
+                          )}
                           <div
                             className="formatted-content"
                             dangerouslySetInnerHTML={{
@@ -2077,7 +2107,7 @@ export default function App() {
                             }}
                           />
 
-                          {msg.sender === 'assistant' && msg.escalate && (
+                          {msg.sender === 'assistant' && msg.escalate && !isGuest && (
                             <div className="support-escalation-actions">
                               <button type="button" onClick={handleConnectToSupport} disabled={supportBusy}>
                                 {supportBusy ? 'Connecting…' : 'Connect with Live Chat'}
@@ -2098,7 +2128,7 @@ export default function App() {
                           {msg.sender === 'assistant' && renderAssistantWidget(msg)}
 
                           {/* Department Verification Badge */}
-                          {msg.sender === 'assistant' && !msg.escalate && (
+                          {msg.sender === 'assistant' && (!msg.escalate || isGuest) && (
                             <div className="src">
                               ✓ Verified by <b>{getDepartmentForQuery(msg.text)}</b> <span>· Updated today</span>
                             </div>
@@ -2122,7 +2152,7 @@ export default function App() {
                           )}
 
                           {/* Was this helpful feedback */}
-                          {msg.sender === 'assistant' && !msg.escalate && <div className="fb">
+                          {msg.sender === 'assistant' && (!msg.escalate || isGuest) && <div className="fb">
                             {feedbackMap[msg.id] ? (
                               <span>
                                 {feedbackMap[msg.id] === 'yes' ? '💚 Thank you for your feedback!' : "👍 Thanks, we'll improve our answers."}
@@ -2239,22 +2269,30 @@ export default function App() {
         </div>
       </main>
 
-      {supportConversation && (
+      {!isGuest && supportConversation && (
         <aside className="support-widget" aria-label="Live support">
           {supportPanelOpen && (
             <section className="support-widget-panel" role="dialog" aria-label="Live support conversation">
               <header className="support-widget-header">
-                <div>
-                  <strong>Live Support</strong>
-                  <span className={`support-widget-status support-widget-status-${supportConversation.status}`}>
-                    {supportConversation.status === 'waiting_for_support' && 'Waiting for Support'}
-                    {supportConversation.status === 'assigned' && 'Assigned'}
-                    {supportConversation.status === 'live_chat' && 'Live Chat'}
-                    {supportConversation.status === 'resolved' && 'Resolved'}
-                    {supportConversation.status === 'ended_by_student' && 'Ended by you'}
-                  </span>
+                <div className="support-widget-header-info">
+                  <div className="support-widget-avatar-torch" aria-hidden="true">
+                    <img src={upangLogo} alt="" />
+                  </div>
+                  <div>
+                    <div className="support-widget-title-row">
+                      <strong>Live Support</strong>
+                      <span className={`support-live-pulse-dot ${supportConversation.status === 'live_chat' ? 'is-live' : ''}`} aria-hidden="true" />
+                    </div>
+                    <span className={`support-widget-status support-widget-status-${supportConversation.status}`}>
+                      {supportConversation.status === 'waiting_for_support' && 'Waiting for Support'}
+                      {supportConversation.status === 'assigned' && 'Assigned'}
+                      {supportConversation.status === 'live_chat' && 'Live Chat'}
+                      {supportConversation.status === 'resolved' && 'Resolved'}
+                      {supportConversation.status === 'ended_by_student' && 'Ended by you'}
+                    </span>
+                  </div>
                 </div>
-                <button type="button" onClick={handleReturnToAI} aria-label="Close live support">×</button>
+                <button type="button" onClick={handleReturnToAI} aria-label="Close live support" className="support-widget-close-btn">×</button>
               </header>
 
               <div className="support-widget-transcript" aria-live="polite">
@@ -2272,11 +2310,31 @@ export default function App() {
                 )}
                 {supportConversation.messages.map((message) => {
                   const mapped = mapSupportMessage(message)
+                  const isUser = mapped.sender === 'user'
                   return (
-                    <div key={message.clientMessageId || message._id} className={`support-widget-message support-widget-message-${mapped.sender}`}>
-                      {mapped.sender === 'admin' && <strong>{mapped.senderName || 'Support administrator'}</strong>}
-                      <p>{mapped.text}</p>
-                      {message.pending && <small>Waiting for connection…</small>}
+                    <div
+                      key={message.clientMessageId || message._id}
+                      className={`support-widget-row support-widget-row-${mapped.sender}`}
+                    >
+                      {!isUser && (
+                        <div className="support-widget-avatar" aria-hidden="true">
+                          <img src={upangLogo} alt="" />
+                        </div>
+                      )}
+                      <div className={`support-widget-message support-widget-message-${mapped.sender}`}>
+                        {mapped.sender === 'admin' && (
+                          <div className="support-widget-sender-header">
+                            <span className="support-widget-badge">LIVE AGENT</span>
+                            <strong className="support-widget-admin-name">{mapped.senderName || 'Support administrator'}</strong>
+                          </div>
+                        )}
+                        <p>{mapped.text}</p>
+                        <div className="support-widget-meta">
+                          {mapped.timestamp && <span className="support-widget-time">{mapped.timestamp}</span>}
+                          {message.pending && <small>Waiting for connection…</small>}
+                          {isUser && !message.pending && <span className="support-widget-ticks" aria-hidden="true">✓✓</span>}
+                        </div>
+                      </div>
                     </div>
                   )
                 })}
@@ -2322,33 +2380,35 @@ export default function App() {
               )}
             </section>
           )}
-          <button
-            type="button"
-            className="support-widget-bubble"
-            onClick={handleSupportPanelToggle}
-            aria-expanded={supportPanelOpen}
-            aria-label={`${supportPanelOpen ? 'Close' : 'Open'} Live Support${supportUnreadCount
-              ? `, ${supportUnreadCount} new ${supportUnreadCount === 1 ? 'reply' : 'replies'}`
-              : `: ${supportConversation.status === 'waiting_for_support'
-                ? 'Waiting for an administrator'
-                : supportConversation.status === 'assigned'
-                  ? 'Administrator assigned'
-                  : supportConversation.status === 'live_chat'
-                    ? 'View your support chat'
-                    : supportConversation.status === 'ended_by_student'
-                      ? 'Ended by you'
-                      : 'View answered inquiry'}`}`}
-          >
-            <svg className="support-widget-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 7.9 7.9 0 0 1-3.3-.72L4 20l1.72-4.48A7.9 7.9 0 0 1 5 12a7.5 7.5 0 1 1 15 0v-.5Z" />
-              <path d="M8.5 12h.01M12 12h.01M15.5 12h.01" />
-            </svg>
-            {supportUnreadCount > 0 && (
-              <span className="support-widget-unread" aria-hidden="true">
-                {supportUnreadCount > 9 ? '9+' : supportUnreadCount}
-              </span>
-            )}
-          </button>
+          {!supportPanelOpen && (
+            <button
+              type="button"
+              className="support-widget-bubble"
+              onClick={handleSupportPanelToggle}
+              aria-expanded={false}
+              aria-label={`Open Live Support${supportUnreadCount
+                ? `, ${supportUnreadCount} new ${supportUnreadCount === 1 ? 'reply' : 'replies'}`
+                : `: ${supportConversation.status === 'waiting_for_support'
+                  ? 'Waiting for an administrator'
+                  : supportConversation.status === 'assigned'
+                    ? 'Administrator assigned'
+                    : supportConversation.status === 'live_chat'
+                      ? 'View your support chat'
+                      : supportConversation.status === 'ended_by_student'
+                        ? 'Ended by you'
+                        : 'View answered inquiry'}`}`}
+            >
+              <svg className="support-widget-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 7.9 7.9 0 0 1-3.3-.72L4 20l1.72-4.48A7.9 7.9 0 0 1 5 12a7.5 7.5 0 1 1 15 0v-.5Z" />
+                <path d="M8.5 12h.01M12 12h.01M15.5 12h.01" />
+              </svg>
+              {supportUnreadCount > 0 && (
+                <span className="support-widget-unread" aria-hidden="true">
+                  {supportUnreadCount > 9 ? '9+' : supportUnreadCount}
+                </span>
+              )}
+            </button>
+          )}
         </aside>
       )}
 
@@ -2369,6 +2429,11 @@ export default function App() {
               onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
               aria-label="Close notification"
             >✕</button>
+            <span
+              className="toast-duration-bar"
+              style={{ animationDuration: `${toast.duration}ms` }}
+              aria-hidden="true"
+            />
           </div>
         ))}
       </div>

@@ -48,8 +48,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <aside
         className={`
-          portal-sidebar fixed inset-y-0 left-0 z-50 flex h-screen w-72 shrink-0 flex-col border-r transition-transform duration-200
-          md:static md:h-[calc(100vh-4rem)] md:w-64 md:translate-x-0 md:flex md:sticky md:top-16
+          portal-sidebar fixed inset-y-0 left-0 z-50 flex h-dvh w-72 max-w-[calc(100vw-1rem)] shrink-0 flex-col border-r transition-transform duration-200
+          md:static md:h-[calc(100dvh-4rem)] md:w-64 md:translate-x-0 md:flex md:sticky md:top-16
           ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
       >

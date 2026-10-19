@@ -37,12 +37,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }))
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       {/* Top Banner & Quick Controls matching user UI hero block */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-[#0d261a] via-[#163d2a] to-[#0a1a12] rounded-3xl p-6 border border-[#df9e28]/40 shadow-2xl relative overflow-hidden">
         <div className="absolute right-0 top-0 bottom-0 w-96 bg-[radial-gradient(circle_at_center,rgba(240,180,69,0.18)_0,transparent_70%)] pointer-events-none" />
         <div className="relative z-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#df9e28]/20 border border-[#df9e28]/40 text-[#f0b445] text-xs font-bold mb-2">
+          <div className="inline-flex flex-wrap items-center gap-2 px-3 py-1 rounded-full bg-[#df9e28]/20 border border-[#df9e28]/40 text-[#f0b445] text-xs font-bold mb-2">
             <Sparkles className="w-3.5 h-3.5 text-[#f0b445]" />
             <span>PHINMA UPang • Dagupan City Campus</span>
           </div>
@@ -125,7 +125,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Weekly Traffic Chart */}
         <div className="lg:col-span-2 glass-panel p-5 rounded-3xl">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <div>
               <h2 className="text-sm font-extrabold text-white">Weekly Student Inquiry Traffic</h2>
               <p className="text-xs text-white/50">Number of campus questions processed per day</p>
@@ -215,7 +215,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full min-w-[620px] text-left text-xs">
               <thead className="border-b border-white/10 text-white/50 font-semibold uppercase text-[10px] tracking-wider">
                 <tr>
                   <th className="pb-2.5 font-bold">Student / ID</th>

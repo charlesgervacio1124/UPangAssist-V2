@@ -54,11 +54,11 @@ export const UsersView: React.FC<UsersViewProps> = ({
   })
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-black text-white tracking-tight">
               Campus User Accounts & Roles
             </h1>
@@ -82,7 +82,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
       {/* Filter Bar */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 glass-panel p-3 rounded-2xl">
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
           <input
             type="text"
@@ -113,7 +113,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
       {/* Table */}
       <div className="glass-panel rounded-3xl overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[720px] text-left text-xs">
             <thead className="border-b border-white/10 text-white/50 uppercase tracking-wider text-[10px] font-bold">
               <tr>
                 <th className="py-3.5 px-4">User</th>
@@ -194,8 +194,8 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
       {/* Add Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
-          <div className="bg-[#0c2217] rounded-3xl border border-[#df9e28]/40 w-full max-w-md shadow-2xl p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
+          <div className="bg-[#0c2217] rounded-3xl border border-[#df9e28]/40 w-full max-w-md max-h-[calc(100dvh-1.5rem)] overflow-y-auto shadow-2xl p-4 sm:p-6">
             <div className="flex items-center justify-between pb-3 border-b border-white/10">
               <h3 className="text-sm font-extrabold text-white">Add Campus Account</h3>
               <button

@@ -63,8 +63,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-white/10 bg-[#0a1a12]/90 backdrop-blur-xl px-4 md:px-6 transition-colors shadow-lg">
-      <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-white/10 bg-[#0a1a12]/90 backdrop-blur-xl px-2 sm:px-4 md:px-6 transition-colors shadow-lg max-[359px]:h-auto max-[359px]:min-h-16 max-[359px]:flex-wrap max-[359px]:gap-y-1 max-[359px]:py-2">
+      <div className="flex min-w-0 items-center gap-3 max-[359px]:flex-1">
         {onToggleSidebar && (
           <button
             onClick={onToggleSidebar}
@@ -81,7 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-white/15 to-[#df9e28]/30 p-1.5 flex items-center justify-center border border-[#df9e28]/50 shadow-md">
             <img src={upangLogo} alt="PHINMA UPang" className="h-full w-full object-contain drop-shadow-[0_1px_4px_rgba(240,180,69,0.3)]" />
           </div>
-          <div>
+          <div className="max-[399px]:hidden">
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-base tracking-tight gold-gradient-text">
                 UPang Assist
@@ -106,12 +106,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 max-[359px]:w-full max-[359px]:justify-end max-[359px]:gap-1">
         <a
           href="http://localhost:5173"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl text-[#34d399] bg-[#34d399]/10 border border-[#34d399]/30 hover:bg-[#34d399]/20 hover:text-white transition-all shadow-xs"
+          aria-label="Open Student Chatbot"
+          className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-semibold rounded-xl text-[#34d399] bg-[#34d399]/10 border border-[#34d399]/30 hover:bg-[#34d399]/20 hover:text-white transition-all shadow-xs"
           title="Open Student Chatbot (localhost:5173)"
         >
           <span className="relative flex h-2 w-2">
@@ -119,7 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
           </span>
           <span className="hidden sm:inline">Student Chatbot</span>
-          <span className="font-mono text-[10px] opacity-80">:5173</span>
+          <span className="hidden font-mono text-[10px] opacity-80 sm:inline">:5173</span>
           <ExternalLink className="w-3.5 h-3.5" />
         </a>
 
@@ -143,7 +144,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Staff Notification Dropdown */}
           {isOpen && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl border border-white/10 bg-[#0e2116] p-4 text-white shadow-2xl backdrop-blur-xl z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+            <div className="fixed right-2 top-[4.5rem] z-50 mt-0 max-h-[calc(100dvh-5rem)] w-[calc(100vw-1rem)] max-w-[20rem] overflow-y-auto rounded-2xl border border-white/10 bg-[#0e2116] p-4 text-white shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-top-2 duration-150 sm:absolute sm:right-0 sm:top-auto sm:mt-2 sm:max-h-none sm:w-96 sm:max-w-none">
               <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3">
                 <div className="flex items-center gap-2">
                   <h4 className="font-bold text-sm text-white">Staff Alerts</h4>

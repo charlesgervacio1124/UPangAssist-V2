@@ -336,7 +336,7 @@ export function App() {
         onLogout={handleLogout}
       />
 
-      <div className="flex flex-1">
+      <div className="flex min-w-0 flex-1">
         {/* Sidebar */}
         <Sidebar
           currentTab={currentTab}
@@ -346,7 +346,7 @@ export function App() {
         />
 
         {/* Main Content Area */}
-        <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full overflow-x-hidden">
+        <main className="min-w-0 w-full max-w-7xl mx-auto flex-1 overflow-x-hidden p-4 md:p-6 lg:p-8">
           {authError && (
             <div role="status" className="mb-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">
               {authError}
